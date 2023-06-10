@@ -1,5 +1,12 @@
 # WebRTC connector for [Yjs](https://github.com/yjs/yjs)
 
+> Nota bene: this repository is basically just a copy of the original [yjs/y-webrtc](https://github.com/yjs/yjs) with one minor extension: it allows you to either
+>
+> * load the script directly from [https://rozek.github.io/y-webrtc/dist/y-webrtc.cjs](https://rozek.github.io/y-webrtc/dist/y-webrtc.cjs) or
+> * import its exports from [https://rozek.github.io/y-webrtc/dist/y-webrtc.mjs](https://rozek.github.io/y-webrtc/dist/y-webrtc.mjs)
+>
+> in case that you encounter some problems with [unpkg](https://unpkg.com/) - like me...
+
 Propagates document updates peer-to-peer to all users using WebRTC.
 
 * Fast message propagation
