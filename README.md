@@ -6,6 +6,8 @@
 > * import its exports from [https://rozek.github.io/y-webrtc/dist/y-webrtc.mjs](https://rozek.github.io/y-webrtc/dist/y-webrtc.mjs)
 >
 > in case that you encounter some problems with [unpkg](https://unpkg.com/) - like me...
+>
+> **Important: if you plan to use Yjs in a "no-build environment" (i.e., without using a module bundler such as [webpack](https://webpack.js.org/) or [Rollup](https://rollupjs.org/)), please import from my [Yjs bundle](https://github.com/rozek/yjs-bundle) in order to avoid a [serious Yjs issue](https://github.com/yjs/yjs/issues/438)!**
 
 Propagates document updates peer-to-peer to all users using WebRTC.
 
