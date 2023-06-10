@@ -22,7 +22,7 @@
     "start": "node ./bin/server.js",
     "debug": "concurrently 'http-server -o index.html' 'npm run watch'",
     "demo": "concurrently 'http-server -o demo/index.html' 'npm run watch'",
-    "dist": "rollup -c",
+    "dist": "rollup -c && cp ./src/y-webrtc.js dist/y-webrtc.mjs",
     "types": "tsc",
     "watch": "rollup -wc",
     "test": "npm run lint",
