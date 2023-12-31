@@ -40,11 +40,12 @@
    * ```
    *
    * @function
-   * @template T,K
-   * @param {Map<K, T>} map
+   * @template V,K
+   * @template {Map<K,V>} MAP
+   * @param {MAP} map
    * @param {K} key
-   * @param {function():T} createT
-   * @return {T}
+   * @param {function():V} createT
+   * @return {V}
    */
   const setIfUndefined = (map, key, createT) => {
     let set = map.get(key);
@@ -112,7 +113,7 @@
    * Return the last element of an array. The element must exist
    *
    * @template L
-   * @param {Array<L>} arr
+   * @param {ArrayLike<L>} arr
    * @return {L}
    */
   const last = arr => arr[arr.length - 1];
@@ -140,6 +141,8 @@
    */
   const from = Array.from;
 
+  const isArray = Array.isArray;
+
   /**
    * Observable class prototype.
    *
@@ -148,7 +151,88 @@
 
   /**
    * Handles named events.
+   * @experimental
    *
+   * This is basically a (better typed) duplicate of Observable, which will replace Observable in the
+   * next release.
+   *
+   * @template {{[key in keyof EVENTS]: function(...any):void}} EVENTS
+   */
+  class ObservableV2 {
+    constructor () {
+      /**
+       * Some desc.
+       * @type {Map<string, Set<any>>}
+       */
+      this._observers = create();
+    }
+
+    /**
+     * @template {keyof EVENTS & string} NAME
+     * @param {NAME} name
+     * @param {EVENTS[NAME]} f
+     */
+    on (name, f) {
+      setIfUndefined(this._observers, /** @type {string} */ (name), create$1).add(f);
+      return f
+    }
+
+    /**
+     * @template {keyof EVENTS & string} NAME
+     * @param {NAME} name
+     * @param {EVENTS[NAME]} f
+     */
+    once (name, f) {
+      /**
+       * @param  {...any} args
+       */
+      const _f = (...args) => {
+        this.off(name, /** @type {any} */ (_f));
+        f(...args);
+      };
+      this.on(name, /** @type {any} */ (_f));
+    }
+
+    /**
+     * @template {keyof EVENTS & string} NAME
+     * @param {NAME} name
+     * @param {EVENTS[NAME]} f
+     */
+    off (name, f) {
+      const observers = this._observers.get(name);
+      if (observers !== undefined) {
+        observers.delete(f);
+        if (observers.size === 0) {
+          this._observers.delete(name);
+        }
+      }
+    }
+
+    /**
+     * Emit a named event. All registered event listeners that listen to the
+     * specified name will receive the event.
+     *
+     * @todo This should catch exceptions
+     *
+     * @template {keyof EVENTS & string} NAME
+     * @param {NAME} name The event name.
+     * @param {Parameters<EVENTS[NAME]>} args The arguments that are applied to the event listener.
+     */
+    emit (name, args) {
+      // copy all listeners to an array first to make sure that no event is emitted to listeners that are subscribed while the event handler is called.
+      return from((this._observers.get(name) || create()).values()).forEach(f => f(...args))
+    }
+
+    destroy () {
+      this._observers = create();
+    }
+  }
+
+  /* c8 ignore start */
+  /**
+   * Handles named events.
+   *
+   * @deprecated
    * @template N
    */
   class Observable {
@@ -215,6 +299,7 @@
       this._observers = create();
     }
   }
+  /* c8 ignore end */
 
   /**
    * Common Math expressions.
@@ -247,6 +332,45 @@
    * @return {boolean} Wether n is negative. This function also differentiates between -0 and +0
    */
   const isNegativeZero = n => n !== 0 ? n < 0 : 1 / n < 0;
+
+  /* eslint-env browser */
+
+  /**
+   * Binary data constants.
+   *
+   * @module binary
+   */
+
+  /**
+   * n-th bit activated.
+   *
+   * @type {number}
+   */
+  const BIT1 = 1;
+  const BIT2 = 2;
+  const BIT3 = 4;
+  const BIT4 = 8;
+  const BIT6 = 32;
+  const BIT7 = 64;
+  const BIT8 = 128;
+  const BITS5 = 31;
+  const BITS6 = 63;
+  const BITS7 = 127;
+  /**
+   * @type {number}
+   */
+  const BITS31 = 0x7FFFFFFF;
+
+  /**
+   * Utility helpers for working with numbers.
+   *
+   * @module number
+   */
+
+  const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+
+  /* c8 ignore next */
+  const isInteger = Number.isInteger || (num => typeof num === 'number' && isFinite(num) && floor(num) === num);
 
   /**
    * Utility module to work with strings.
@@ -293,7 +417,7 @@
     return buf
   };
 
-  /* istanbul ignore next */
+  /* c8 ignore next */
   const utf8TextEncoder = /** @type {TextEncoder} */ (typeof TextEncoder !== 'undefined' ? new TextEncoder() : null);
 
   /**
@@ -306,418 +430,645 @@
    * @param {string} str
    * @return {Uint8Array}
    */
-  /* istanbul ignore next */
+  /* c8 ignore next */
   const encodeUtf8 = utf8TextEncoder ? _encodeUtf8Native : _encodeUtf8Polyfill;
 
-  /* istanbul ignore next */
+  /* c8 ignore next */
   let utf8TextDecoder = typeof TextDecoder === 'undefined' ? null : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
-  /* istanbul ignore next */
+  /* c8 ignore start */
   if (utf8TextDecoder && utf8TextDecoder.decode(new Uint8Array()).length === 1) {
     // Safari doesn't handle BOM correctly.
     // This fixes a bug in Safari 13.0.5 where it produces a BOM the first time it is called.
     // utf8TextDecoder.decode(new Uint8Array()).length === 1 on the first call and
     // utf8TextDecoder.decode(new Uint8Array()).length === 1 on the second call
     // Another issue is that from then on no BOM chars are recognized anymore
-    /* istanbul ignore next */
+    /* c8 ignore next */
     utf8TextDecoder = null;
   }
 
   /**
-   * Often used conditions.
+   * Efficient schema-less binary encoding with support for variable length encoding.
    *
-   * @module conditions
+   * Use [lib0/encoding] with [lib0/decoding]. Every encoding function has a corresponding decoding function.
+   *
+   * Encodes numbers in little-endian order (least to most significant byte order)
+   * and is compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
+   * which is also used in Protocol Buffers.
+   *
+   * ```js
+   * // encoding step
+   * const encoder = encoding.createEncoder()
+   * encoding.writeVarUint(encoder, 256)
+   * encoding.writeVarString(encoder, 'Hello world!')
+   * const buf = encoding.toUint8Array(encoder)
+   * ```
+   *
+   * ```js
+   * // decoding step
+   * const decoder = decoding.createDecoder(buf)
+   * decoding.readVarUint(decoder) // => 256
+   * decoding.readVarString(decoder) // => 'Hello world!'
+   * decoding.hasContent(decoder) // => false - all data is read
+   * ```
+   *
+   * @module encoding
    */
 
   /**
-   * @template T
-   * @param {T|null|undefined} v
-   * @return {T|null}
+   * A BinaryEncoder handles the encoding to an Uint8Array.
    */
-  /* istanbul ignore next */
-  const undefinedToNull = v => v === undefined ? null : v;
-
-  /* global localStorage, addEventListener */
-
-  /**
-   * Isomorphic variable storage.
-   *
-   * Uses LocalStorage in the browser and falls back to in-memory storage.
-   *
-   * @module storage
-   */
-
-  /* istanbul ignore next */
-  class VarStoragePolyfill {
+  class Encoder {
     constructor () {
-      this.map = new Map();
-    }
-
-    /**
-     * @param {string} key
-     * @param {any} newValue
-     */
-    setItem (key, newValue) {
-      this.map.set(key, newValue);
-    }
-
-    /**
-     * @param {string} key
-     */
-    getItem (key) {
-      return this.map.get(key)
+      this.cpos = 0;
+      this.cbuf = new Uint8Array(100);
+      /**
+       * @type {Array<Uint8Array>}
+       */
+      this.bufs = [];
     }
   }
 
-  /* istanbul ignore next */
   /**
-   * @type {any}
-   */
-  let _localStorage = new VarStoragePolyfill();
-  let usePolyfill = true;
-
-  try {
-    // if the same-origin rule is violated, accessing localStorage might thrown an error
-    /* istanbul ignore next */
-    if (typeof localStorage !== 'undefined') {
-      _localStorage = localStorage;
-      usePolyfill = false;
-    }
-  } catch (e) { }
-
-  /* istanbul ignore next */
-  /**
-   * This is basically localStorage in browser, or a polyfill in nodejs
-   */
-  const varStorage = _localStorage;
-
-  /* istanbul ignore next */
-  /**
-   * A polyfill for `addEventListener('storage', event => {..})` that does nothing if the polyfill is being used.
-   *
-   * @param {function({ key: string, newValue: string, oldValue: string }): void} eventHandler
    * @function
+   * @return {Encoder}
    */
-  const onChange = eventHandler => usePolyfill || addEventListener('storage', /** @type {any} */ (eventHandler));
+  const createEncoder = () => new Encoder();
 
   /**
-   * Utility functions for working with EcmaScript objects.
+   * The current length of the encoded data.
    *
-   * @module object
-   */
-
-  /**
-   * @param {Object<string,any>} obj
-   */
-  const keys = Object.keys;
-
-  /**
-   * @param {Object<string,any>} obj
+   * @function
+   * @param {Encoder} encoder
    * @return {number}
    */
-  const length = obj => keys(obj).length;
-
-  /**
-   * @param {Object<string,any>} obj
-   * @param {function(any,string):boolean} f
-   * @return {boolean}
-   */
-  const every = (obj, f) => {
-    for (const key in obj) {
-      if (!f(obj[key], key)) {
-        return false
-      }
+  const length = encoder => {
+    let len = encoder.cpos;
+    for (let i = 0; i < encoder.bufs.length; i++) {
+      len += encoder.bufs[i].length;
     }
-    return true
+    return len
   };
 
   /**
-   * Calls `Object.prototype.hasOwnProperty`.
+   * Transform to Uint8Array.
    *
-   * @param {any} obj
-   * @param {string|symbol} key
-   * @return {boolean}
+   * @function
+   * @param {Encoder} encoder
+   * @return {Uint8Array} The created ArrayBuffer.
    */
-  const hasProperty = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+  const toUint8Array = encoder => {
+    const uint8arr = new Uint8Array(length(encoder));
+    let curPos = 0;
+    for (let i = 0; i < encoder.bufs.length; i++) {
+      const d = encoder.bufs[i];
+      uint8arr.set(d, curPos);
+      curPos += d.length;
+    }
+    uint8arr.set(new Uint8Array(encoder.cbuf.buffer, 0, encoder.cpos), curPos);
+    return uint8arr
+  };
 
   /**
-   * @param {Object<string,any>} a
-   * @param {Object<string,any>} b
-   * @return {boolean}
-   */
-  const equalFlat = (a, b) => a === b || (length(a) === length(b) && every(a, (val, key) => (val !== undefined || hasProperty(b, key)) && b[key] === val));
-
-  /**
-   * Common functions and function call helpers.
+   * Verify that it is possible to write `len` bytes wtihout checking. If
+   * necessary, a new Buffer with the required length is attached.
    *
-   * @module function
+   * @param {Encoder} encoder
+   * @param {number} len
    */
-
-  /**
-   * Calls all functions in `fs` with args. Only throws after all functions were called.
-   *
-   * @param {Array<function>} fs
-   * @param {Array<any>} args
-   */
-  const callAll = (fs, args, i = 0) => {
-    try {
-      for (; i < fs.length; i++) {
-        fs[i](...args);
-      }
-    } finally {
-      if (i < fs.length) {
-        callAll(fs, args, i + 1);
-      }
+  const verifyLen = (encoder, len) => {
+    const bufferLen = encoder.cbuf.length;
+    if (bufferLen - encoder.cpos < len) {
+      encoder.bufs.push(new Uint8Array(encoder.cbuf.buffer, 0, encoder.cpos));
+      encoder.cbuf = new Uint8Array(max(bufferLen, len) * 2);
+      encoder.cpos = 0;
     }
   };
 
-  const nop = () => {};
-
   /**
-   * @template T
+   * Write one byte to the encoder.
    *
-   * @param {T} a
-   * @param {T} b
-   * @return {boolean}
+   * @function
+   * @param {Encoder} encoder
+   * @param {number} num The byte that is to be encoded.
    */
-  const equalityStrict = (a, b) => a === b;
+  const write = (encoder, num) => {
+    const bufferLen = encoder.cbuf.length;
+    if (encoder.cpos === bufferLen) {
+      encoder.bufs.push(encoder.cbuf);
+      encoder.cbuf = new Uint8Array(bufferLen * 2);
+      encoder.cpos = 0;
+    }
+    encoder.cbuf[encoder.cpos++] = num;
+  };
 
   /**
-   * @param {any} a
-   * @param {any} b
+   * Write one byte as an unsigned integer.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {number} num The number that is to be encoded.
+   */
+  const writeUint8 = write;
+
+  /**
+   * Write a variable length unsigned integer. Max encodable integer is 2^53.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {number} num The number that is to be encoded.
+   */
+  const writeVarUint = (encoder, num) => {
+    while (num > BITS7) {
+      write(encoder, BIT8 | (BITS7 & num));
+      num = floor(num / 128); // shift >>> 7
+    }
+    write(encoder, BITS7 & num);
+  };
+
+  /**
+   * Write a variable length integer.
+   *
+   * We use the 7th bit instead for signaling that this is a negative number.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {number} num The number that is to be encoded.
+   */
+  const writeVarInt = (encoder, num) => {
+    const isNegative = isNegativeZero(num);
+    if (isNegative) {
+      num = -num;
+    }
+    //             |- whether to continue reading         |- whether is negative     |- number
+    write(encoder, (num > BITS6 ? BIT8 : 0) | (isNegative ? BIT7 : 0) | (BITS6 & num));
+    num = floor(num / 64); // shift >>> 6
+    // We don't need to consider the case of num === 0 so we can use a different
+    // pattern here than above.
+    while (num > 0) {
+      write(encoder, (num > BITS7 ? BIT8 : 0) | (BITS7 & num));
+      num = floor(num / 128); // shift >>> 7
+    }
+  };
+
+  /**
+   * A cache to store strings temporarily
+   */
+  const _strBuffer = new Uint8Array(30000);
+  const _maxStrBSize = _strBuffer.length / 3;
+
+  /**
+   * Write a variable length string.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {String} str The string that is to be encoded.
+   */
+  const _writeVarStringNative = (encoder, str) => {
+    if (str.length < _maxStrBSize) {
+      // We can encode the string into the existing buffer
+      /* c8 ignore next */
+      const written = utf8TextEncoder.encodeInto(str, _strBuffer).written || 0;
+      writeVarUint(encoder, written);
+      for (let i = 0; i < written; i++) {
+        write(encoder, _strBuffer[i]);
+      }
+    } else {
+      writeVarUint8Array(encoder, encodeUtf8(str));
+    }
+  };
+
+  /**
+   * Write a variable length string.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {String} str The string that is to be encoded.
+   */
+  const _writeVarStringPolyfill = (encoder, str) => {
+    const encodedString = unescape(encodeURIComponent(str));
+    const len = encodedString.length;
+    writeVarUint(encoder, len);
+    for (let i = 0; i < len; i++) {
+      write(encoder, /** @type {number} */ (encodedString.codePointAt(i)));
+    }
+  };
+
+  /**
+   * Write a variable length string.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {String} str The string that is to be encoded.
+   */
+  /* c8 ignore next */
+  const writeVarString = (utf8TextEncoder && /** @type {any} */ (utf8TextEncoder).encodeInto) ? _writeVarStringNative : _writeVarStringPolyfill;
+
+  /**
+   * Append fixed-length Uint8Array to the encoder.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {Uint8Array} uint8Array
+   */
+  const writeUint8Array = (encoder, uint8Array) => {
+    const bufferLen = encoder.cbuf.length;
+    const cpos = encoder.cpos;
+    const leftCopyLen = min(bufferLen - cpos, uint8Array.length);
+    const rightCopyLen = uint8Array.length - leftCopyLen;
+    encoder.cbuf.set(uint8Array.subarray(0, leftCopyLen), cpos);
+    encoder.cpos += leftCopyLen;
+    if (rightCopyLen > 0) {
+      // Still something to write, write right half..
+      // Append new buffer
+      encoder.bufs.push(encoder.cbuf);
+      // must have at least size of remaining buffer
+      encoder.cbuf = new Uint8Array(max(bufferLen * 2, rightCopyLen));
+      // copy array
+      encoder.cbuf.set(uint8Array.subarray(leftCopyLen));
+      encoder.cpos = rightCopyLen;
+    }
+  };
+
+  /**
+   * Append an Uint8Array to Encoder.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {Uint8Array} uint8Array
+   */
+  const writeVarUint8Array = (encoder, uint8Array) => {
+    writeVarUint(encoder, uint8Array.byteLength);
+    writeUint8Array(encoder, uint8Array);
+  };
+
+  /**
+   * Create an DataView of the next `len` bytes. Use it to write data after
+   * calling this function.
+   *
+   * ```js
+   * // write float32 using DataView
+   * const dv = writeOnDataView(encoder, 4)
+   * dv.setFloat32(0, 1.1)
+   * // read float32 using DataView
+   * const dv = readFromDataView(encoder, 4)
+   * dv.getFloat32(0) // => 1.100000023841858 (leaving it to the reader to find out why this is the correct result)
+   * ```
+   *
+   * @param {Encoder} encoder
+   * @param {number} len
+   * @return {DataView}
+   */
+  const writeOnDataView = (encoder, len) => {
+    verifyLen(encoder, len);
+    const dview = new DataView(encoder.cbuf.buffer, encoder.cpos, len);
+    encoder.cpos += len;
+    return dview
+  };
+
+  /**
+   * @param {Encoder} encoder
+   * @param {number} num
+   */
+  const writeFloat32 = (encoder, num) => writeOnDataView(encoder, 4).setFloat32(0, num, false);
+
+  /**
+   * @param {Encoder} encoder
+   * @param {number} num
+   */
+  const writeFloat64 = (encoder, num) => writeOnDataView(encoder, 8).setFloat64(0, num, false);
+
+  /**
+   * @param {Encoder} encoder
+   * @param {bigint} num
+   */
+  const writeBigInt64 = (encoder, num) => /** @type {any} */ (writeOnDataView(encoder, 8)).setBigInt64(0, num, false);
+
+  const floatTestBed = new DataView(new ArrayBuffer(4));
+  /**
+   * Check if a number can be encoded as a 32 bit float.
+   *
+   * @param {number} num
    * @return {boolean}
    */
-  const equalityDeep = (a, b) => {
-    if (a == null || b == null) {
-      return equalityStrict(a, b)
-    }
-    if (a.constructor !== b.constructor) {
-      return false
-    }
-    if (a === b) {
-      return true
-    }
-    switch (a.constructor) {
-      case ArrayBuffer:
-        a = new Uint8Array(a);
-        b = new Uint8Array(b);
-      // eslint-disable-next-line no-fallthrough
-      case Uint8Array: {
-        if (a.byteLength !== b.byteLength) {
-          return false
+  const isFloat32 = num => {
+    floatTestBed.setFloat32(0, num);
+    return floatTestBed.getFloat32(0) === num
+  };
+
+  /**
+   * Encode data with efficient binary format.
+   *
+   * Differences to JSON:
+   * • Transforms data to a binary format (not to a string)
+   * • Encodes undefined, NaN, and ArrayBuffer (these can't be represented in JSON)
+   * • Numbers are efficiently encoded either as a variable length integer, as a
+   *   32 bit float, as a 64 bit float, or as a 64 bit bigint.
+   *
+   * Encoding table:
+   *
+   * | Data Type           | Prefix   | Encoding Method    | Comment |
+   * | ------------------- | -------- | ------------------ | ------- |
+   * | undefined           | 127      |                    | Functions, symbol, and everything that cannot be identified is encoded as undefined |
+   * | null                | 126      |                    | |
+   * | integer             | 125      | writeVarInt        | Only encodes 32 bit signed integers |
+   * | float32             | 124      | writeFloat32       | |
+   * | float64             | 123      | writeFloat64       | |
+   * | bigint              | 122      | writeBigInt64      | |
+   * | boolean (false)     | 121      |                    | True and false are different data types so we save the following byte |
+   * | boolean (true)      | 120      |                    | - 0b01111000 so the last bit determines whether true or false |
+   * | string              | 119      | writeVarString     | |
+   * | object<string,any>  | 118      | custom             | Writes {length} then {length} key-value pairs |
+   * | array<any>          | 117      | custom             | Writes {length} then {length} json values |
+   * | Uint8Array          | 116      | writeVarUint8Array | We use Uint8Array for any kind of binary data |
+   *
+   * Reasons for the decreasing prefix:
+   * We need the first bit for extendability (later we may want to encode the
+   * prefix with writeVarUint). The remaining 7 bits are divided as follows:
+   * [0-30]   the beginning of the data range is used for custom purposes
+   *          (defined by the function that uses this library)
+   * [31-127] the end of the data range is used for data encoding by
+   *          lib0/encoding.js
+   *
+   * @param {Encoder} encoder
+   * @param {undefined|null|number|bigint|boolean|string|Object<string,any>|Array<any>|Uint8Array} data
+   */
+  const writeAny = (encoder, data) => {
+    switch (typeof data) {
+      case 'string':
+        // TYPE 119: STRING
+        write(encoder, 119);
+        writeVarString(encoder, data);
+        break
+      case 'number':
+        if (isInteger(data) && abs(data) <= BITS31) {
+          // TYPE 125: INTEGER
+          write(encoder, 125);
+          writeVarInt(encoder, data);
+        } else if (isFloat32(data)) {
+          // TYPE 124: FLOAT32
+          write(encoder, 124);
+          writeFloat32(encoder, data);
+        } else {
+          // TYPE 123: FLOAT64
+          write(encoder, 123);
+          writeFloat64(encoder, data);
         }
-        for (let i = 0; i < a.length; i++) {
-          if (a[i] !== b[i]) {
-            return false
+        break
+      case 'bigint':
+        // TYPE 122: BigInt
+        write(encoder, 122);
+        writeBigInt64(encoder, data);
+        break
+      case 'object':
+        if (data === null) {
+          // TYPE 126: null
+          write(encoder, 126);
+        } else if (isArray(data)) {
+          // TYPE 117: Array
+          write(encoder, 117);
+          writeVarUint(encoder, data.length);
+          for (let i = 0; i < data.length; i++) {
+            writeAny(encoder, data[i]);
+          }
+        } else if (data instanceof Uint8Array) {
+          // TYPE 116: ArrayBuffer
+          write(encoder, 116);
+          writeVarUint8Array(encoder, data);
+        } else {
+          // TYPE 118: Object
+          write(encoder, 118);
+          const keys = Object.keys(data);
+          writeVarUint(encoder, keys.length);
+          for (let i = 0; i < keys.length; i++) {
+            const key = keys[i];
+            writeVarString(encoder, key);
+            writeAny(encoder, data[key]);
           }
         }
         break
-      }
-      case Set: {
-        if (a.size !== b.size) {
-          return false
-        }
-        for (const value of a) {
-          if (!b.has(value)) {
-            return false
-          }
-        }
-        break
-      }
-      case Map: {
-        if (a.size !== b.size) {
-          return false
-        }
-        for (const key of a.keys()) {
-          if (!b.has(key) || !equalityDeep(a.get(key), b.get(key))) {
-            return false
-          }
-        }
-        break
-      }
-      case Object:
-        if (length(a) !== length(b)) {
-          return false
-        }
-        for (const key in a) {
-          if (!hasProperty(a, key) || !equalityDeep(a[key], b[key])) {
-            return false
-          }
-        }
-        break
-      case Array:
-        if (a.length !== b.length) {
-          return false
-        }
-        for (let i = 0; i < a.length; i++) {
-          if (!equalityDeep(a[i], b[i])) {
-            return false
-          }
-        }
+      case 'boolean':
+        // TYPE 120/121: boolean (true/false)
+        write(encoder, data ? 120 : 121);
         break
       default:
-        return false
+        // TYPE 127: undefined
+        write(encoder, 127);
     }
-    return true
   };
 
   /**
-   * @template V
-   * @template {V} OPTS
-   *
-   * @param {V} value
-   * @param {Array<OPTS>} options
+   * Now come a few stateful encoder that have their own classes.
    */
-  // @ts-ignore
-  const isOneOf = (value, options) => options.includes(value);
 
   /**
-   * Isomorphic module to work access the environment (query params, env variables).
+   * Basic Run Length Encoder - a basic compression implementation.
    *
-   * @module map
+   * Encodes [1,1,1,7] to [1,3,7,1] (3 times 1, 1 time 7). This encoder might do more harm than good if there are a lot of values that are not repeated.
+   *
+   * It was originally used for image compression. Cool .. article http://csbruce.com/cbm/transactor/pdfs/trans_v7_i06.pdf
+   *
+   * @note T must not be null!
+   *
+   * @template T
    */
+  class RleEncoder extends Encoder {
+    /**
+     * @param {function(Encoder, T):void} writer
+     */
+    constructor (writer) {
+      super();
+      /**
+       * The writer
+       */
+      this.w = writer;
+      /**
+       * Current state
+       * @type {T|null}
+       */
+      this.s = null;
+      this.count = 0;
+    }
 
-  /* istanbul ignore next */
-  // @ts-ignore
-  const isNode = typeof process !== 'undefined' && process.release &&
-    /node|io\.js/.test(process.release.name);
-  /* istanbul ignore next */
-  const isBrowser = typeof window !== 'undefined' && !isNode;
-  /* istanbul ignore next */
-  const isMac = typeof navigator !== 'undefined'
-    ? /Mac/.test(navigator.platform)
-    : false;
-
-  /**
-   * @type {Map<string,string>}
-   */
-  let params;
-
-  /* istanbul ignore next */
-  const computeParams = () => {
-    if (params === undefined) {
-      if (isNode) {
-        params = create();
-        const pargs = process.argv;
-        let currParamName = null;
-        /* istanbul ignore next */
-        for (let i = 0; i < pargs.length; i++) {
-          const parg = pargs[i];
-          if (parg[0] === '-') {
-            if (currParamName !== null) {
-              params.set(currParamName, '');
-            }
-            currParamName = parg;
-          } else {
-            if (currParamName !== null) {
-              params.set(currParamName, parg);
-              currParamName = null;
-            }
-          }
-        }
-        if (currParamName !== null) {
-          params.set(currParamName, '');
-        }
-        // in ReactNative for example this would not be true (unless connected to the Remote Debugger)
-      } else if (typeof location === 'object') {
-        params = create(); // eslint-disable-next-line no-undef
-        (location.search || '?').slice(1).split('&').forEach((kv) => {
-          if (kv.length !== 0) {
-            const [key, value] = kv.split('=');
-            params.set(`--${fromCamelCase(key, '-')}`, value);
-            params.set(`-${fromCamelCase(key, '-')}`, value);
-          }
-        });
+    /**
+     * @param {T} v
+     */
+    write (v) {
+      if (this.s === v) {
+        this.count++;
       } else {
-        params = create();
+        if (this.count > 0) {
+          // flush counter, unless this is the first value (count = 0)
+          writeVarUint(this, this.count - 1); // since count is always > 0, we can decrement by one. non-standard encoding ftw
+        }
+        this.count = 1;
+        // write first value
+        this.w(this, v);
+        this.s = v;
       }
     }
-    return params
+  }
+
+  /**
+   * @param {UintOptRleEncoder} encoder
+   */
+  const flushUintOptRleEncoder = encoder => {
+    if (encoder.count > 0) {
+      // flush counter, unless this is the first value (count = 0)
+      // case 1: just a single value. set sign to positive
+      // case 2: write several values. set sign to negative to indicate that there is a length coming
+      writeVarInt(encoder.encoder, encoder.count === 1 ? encoder.s : -encoder.s);
+      if (encoder.count > 1) {
+        writeVarUint(encoder.encoder, encoder.count - 2); // since count is always > 1, we can decrement by one. non-standard encoding ftw
+      }
+    }
   };
 
   /**
-   * @param {string} name
-   * @return {boolean}
-   */
-  /* istanbul ignore next */
-  const hasParam = (name) => computeParams().has(name);
-  // export const getArgs = name => computeParams() && args
-
-  /**
-   * @param {string} name
-   * @return {string|null}
-   */
-  /* istanbul ignore next */
-  const getVariable = (name) =>
-    isNode
-      ? undefinedToNull(process.env[name.toUpperCase()])
-      : undefinedToNull(varStorage.getItem(name));
-
-  /**
-   * @param {string} name
-   * @return {boolean}
-   */
-  /* istanbul ignore next */
-  const hasConf = (name) =>
-    hasParam('--' + name) || getVariable(name) !== null;
-
-  /* istanbul ignore next */
-  const production = hasConf('production');
-
-  /* istanbul ignore next */
-  const forceColor = isNode &&
-    isOneOf(process.env.FORCE_COLOR, ['true', '1', '2']);
-
-  /* istanbul ignore next */
-  const supportsColor = !hasParam('no-colors') &&
-    (!isNode || process.stdout.isTTY || forceColor) && (
-    !isNode || hasParam('color') || forceColor ||
-      getVariable('COLORTERM') !== null ||
-      (getVariable('TERM') || '').includes('color')
-  );
-
-  /* eslint-env browser */
-
-  /**
-   * Binary data constants.
+   * Optimized Rle encoder that does not suffer from the mentioned problem of the basic Rle encoder.
    *
-   * @module binary
-   */
-
-  /**
-   * n-th bit activated.
+   * Internally uses VarInt encoder to write unsigned integers. If the input occurs multiple times, we write
+   * write it as a negative number. The UintOptRleDecoder then understands that it needs to read a count.
    *
-   * @type {number}
+   * Encodes [1,2,3,3,3] as [1,2,-3,3] (once 1, once 2, three times 3)
    */
-  const BIT1 = 1;
-  const BIT2 = 2;
-  const BIT3 = 4;
-  const BIT4 = 8;
-  const BIT6 = 32;
-  const BIT7 = 64;
-  const BIT8 = 128;
-  const BITS5 = 31;
-  const BITS6 = 63;
-  const BITS7 = 127;
-  /**
-   * @type {number}
-   */
-  const BITS31 = 0x7FFFFFFF;
+  class UintOptRleEncoder {
+    constructor () {
+      this.encoder = new Encoder();
+      /**
+       * @type {number}
+       */
+      this.s = 0;
+      this.count = 0;
+    }
+
+    /**
+     * @param {number} v
+     */
+    write (v) {
+      if (this.s === v) {
+        this.count++;
+      } else {
+        flushUintOptRleEncoder(this);
+        this.count = 1;
+        this.s = v;
+      }
+    }
+
+    toUint8Array () {
+      flushUintOptRleEncoder(this);
+      return toUint8Array(this.encoder)
+    }
+  }
 
   /**
-   * Utility helpers for working with numbers.
+   * @param {IntDiffOptRleEncoder} encoder
+   */
+  const flushIntDiffOptRleEncoder = encoder => {
+    if (encoder.count > 0) {
+      //          31 bit making up the diff | wether to write the counter
+      // const encodedDiff = encoder.diff << 1 | (encoder.count === 1 ? 0 : 1)
+      const encodedDiff = encoder.diff * 2 + (encoder.count === 1 ? 0 : 1);
+      // flush counter, unless this is the first value (count = 0)
+      // case 1: just a single value. set first bit to positive
+      // case 2: write several values. set first bit to negative to indicate that there is a length coming
+      writeVarInt(encoder.encoder, encodedDiff);
+      if (encoder.count > 1) {
+        writeVarUint(encoder.encoder, encoder.count - 2); // since count is always > 1, we can decrement by one. non-standard encoding ftw
+      }
+    }
+  };
+
+  /**
+   * A combination of the IntDiffEncoder and the UintOptRleEncoder.
    *
-   * @module number
+   * The count approach is similar to the UintDiffOptRleEncoder, but instead of using the negative bitflag, it encodes
+   * in the LSB whether a count is to be read. Therefore this Encoder only supports 31 bit integers!
+   *
+   * Encodes [1, 2, 3, 2] as [3, 1, 6, -1] (more specifically [(1 << 1) | 1, (3 << 0) | 0, -1])
+   *
+   * Internally uses variable length encoding. Contrary to normal UintVar encoding, the first byte contains:
+   * * 1 bit that denotes whether the next value is a count (LSB)
+   * * 1 bit that denotes whether this value is negative (MSB - 1)
+   * * 1 bit that denotes whether to continue reading the variable length integer (MSB)
+   *
+   * Therefore, only five bits remain to encode diff ranges.
+   *
+   * Use this Encoder only when appropriate. In most cases, this is probably a bad idea.
    */
+  class IntDiffOptRleEncoder {
+    constructor () {
+      this.encoder = new Encoder();
+      /**
+       * @type {number}
+       */
+      this.s = 0;
+      this.count = 0;
+      this.diff = 0;
+    }
 
-  const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+    /**
+     * @param {number} v
+     */
+    write (v) {
+      if (this.diff === v - this.s) {
+        this.s = v;
+        this.count++;
+      } else {
+        flushIntDiffOptRleEncoder(this);
+        this.count = 1;
+        this.diff = v - this.s;
+        this.s = v;
+      }
+    }
+
+    toUint8Array () {
+      flushIntDiffOptRleEncoder(this);
+      return toUint8Array(this.encoder)
+    }
+  }
 
   /**
-   * @module number
+   * Optimized String Encoder.
+   *
+   * Encoding many small strings in a simple Encoder is not very efficient. The function call to decode a string takes some time and creates references that must be eventually deleted.
+   * In practice, when decoding several million small strings, the GC will kick in more and more often to collect orphaned string objects (or maybe there is another reason?).
+   *
+   * This string encoder solves the above problem. All strings are concatenated and written as a single string using a single encoding call.
+   *
+   * The lengths are encoded using a UintOptRleEncoder.
    */
+  class StringEncoder {
+    constructor () {
+      /**
+       * @type {Array<string>}
+       */
+      this.sarr = [];
+      this.s = '';
+      this.lensE = new UintOptRleEncoder();
+    }
 
-  /* istanbul ignore next */
-  const isInteger = Number.isInteger || (num => typeof num === 'number' && isFinite(num) && floor(num) === num);
+    /**
+     * @param {string} string
+     */
+    write (string) {
+      this.s += string;
+      if (this.s.length > 19) {
+        this.sarr.push(this.s);
+        this.s = '';
+      }
+      this.lensE.write(string.length);
+    }
+
+    toUint8Array () {
+      const encoder = new Encoder();
+      this.sarr.push(this.s);
+      this.s = '';
+      writeVarString(encoder, this.sarr.join(''));
+      writeUint8Array(encoder, this.lensE.toUint8Array());
+      return toUint8Array(encoder)
+    }
+  }
 
   /**
    * Error helpers.
@@ -725,27 +1076,27 @@
    * @module error
    */
 
-  /* istanbul ignore next */
   /**
    * @param {string} s
    * @return {Error}
    */
+  /* c8 ignore next */
   const create$2 = s => new Error(s);
 
-  /* istanbul ignore next */
   /**
    * @throws {Error}
    * @return {never}
    */
+  /* c8 ignore next 3 */
   const methodUnimplemented = () => {
     throw create$2('Method unimplemented')
   };
 
-  /* istanbul ignore next */
   /**
    * @throws {Error}
    * @return {never}
    */
+  /* c8 ignore next 3 */
   const unexpectedCase = () => {
     throw create$2('Unexpected case')
   };
@@ -761,7 +1112,7 @@
    *
    * ```js
    * // encoding step
-   * const encoder = new encoding.createEncoder()
+   * const encoder = encoding.createEncoder()
    * encoding.writeVarUint(encoder, 256)
    * encoding.writeVarString(encoder, 'Hello world!')
    * const buf = encoding.toUint8Array(encoder)
@@ -769,7 +1120,7 @@
    *
    * ```js
    * // decoding step
-   * const decoder = new decoding.createDecoder(buf)
+   * const decoder = decoding.createDecoder(buf)
    * decoding.readVarUint(decoder) // => 256
    * decoding.readVarString(decoder) // => 'Hello world!'
    * decoding.hasContent(decoder) // => false - all data is read
@@ -830,7 +1181,7 @@
    * @return {Uint8Array}
    */
   const readUint8Array = (decoder, len) => {
-    const view = createUint8ArrayViewFromArrayBuffer(decoder.arr.buffer, decoder.pos + decoder.arr.byteOffset, len);
+    const view = new Uint8Array(decoder.arr.buffer, decoder.pos + decoder.arr.byteOffset, len);
     decoder.pos += len;
     return view
   };
@@ -877,10 +1228,11 @@
       if (r < BIT8) {
         return num
       }
-      /* istanbul ignore if */
+      /* c8 ignore start */
       if (num > MAX_SAFE_INTEGER) {
         throw errorIntegerOutOfRange
       }
+      /* c8 ignore stop */
     }
     throw errorUnexpectedEndOfArray
   };
@@ -914,10 +1266,11 @@
       if (r < BIT8) {
         return sign * num
       }
-      /* istanbul ignore if */
+      /* c8 ignore start */
       if (num > MAX_SAFE_INTEGER) {
         throw errorIntegerOutOfRange
       }
+      /* c8 ignore stop */
     }
     throw errorUnexpectedEndOfArray
   };
@@ -935,7 +1288,7 @@
    * @param {Decoder} decoder
    * @return {String} The read String.
    */
-  /* istanbul ignore next */
+  /* c8 ignore start */
   const _readVarStringPolyfill = decoder => {
     let remainingLen = readVarUint(decoder);
     if (remainingLen === 0) {
@@ -960,6 +1313,7 @@
       return decodeURIComponent(escape(encodedString))
     }
   };
+  /* c8 ignore stop */
 
   /**
    * @function
@@ -978,7 +1332,7 @@
    * @return {String} The read String
    *
    */
-  /* istanbul ignore next */
+  /* c8 ignore next */
   const readVarString = utf8TextDecoder ? _readVarStringNative : _readVarStringPolyfill;
 
   /**
@@ -1173,749 +1527,27 @@
     }
   }
 
-  /**
-   * Utility functions to work with buffers (Uint8Array).
-   *
-   * @module buffer
-   */
-
-  /**
-   * @param {number} len
-   */
-  const createUint8ArrayFromLen = len => new Uint8Array(len);
-
-  /**
-   * Create Uint8Array with initial content from buffer
-   *
-   * @param {ArrayBuffer} buffer
-   * @param {number} byteOffset
-   * @param {number} length
-   */
-  const createUint8ArrayViewFromArrayBuffer = (buffer, byteOffset, length) => new Uint8Array(buffer, byteOffset, length);
-
-  /**
-   * Create Uint8Array with initial content from buffer
-   *
-   * @param {ArrayBuffer} buffer
-   */
-  const createUint8ArrayFromArrayBuffer = buffer => new Uint8Array(buffer);
-
-  /* istanbul ignore next */
-  /**
-   * @param {Uint8Array} bytes
-   * @return {string}
-   */
-  const toBase64Browser = bytes => {
-    let s = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      s += fromCharCode(bytes[i]);
-    }
-    // eslint-disable-next-line no-undef
-    return btoa(s)
-  };
-
-  /**
-   * @param {Uint8Array} bytes
-   * @return {string}
-   */
-  const toBase64Node = bytes => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64');
-
-  /* istanbul ignore next */
-  /**
-   * @param {string} s
-   * @return {Uint8Array}
-   */
-  const fromBase64Browser = s => {
-    // eslint-disable-next-line no-undef
-    const a = atob(s);
-    const bytes = createUint8ArrayFromLen(a.length);
-    for (let i = 0; i < a.length; i++) {
-      bytes[i] = a.charCodeAt(i);
-    }
-    return bytes
-  };
-
-  /**
-   * @param {string} s
-   */
-  const fromBase64Node = s => {
-    const buf = Buffer.from(s, 'base64');
-    return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
-  };
-
-  /* istanbul ignore next */
-  const toBase64 = isBrowser ? toBase64Browser : toBase64Node;
-
-  /* istanbul ignore next */
-  const fromBase64 = isBrowser ? fromBase64Browser : fromBase64Node;
-
-  /**
-   * Copy the content of an Uint8Array view to a new ArrayBuffer.
-   *
-   * @param {Uint8Array} uint8Array
-   * @return {Uint8Array}
-   */
-  const copyUint8Array = uint8Array => {
-    const newBuf = createUint8ArrayFromLen(uint8Array.byteLength);
-    newBuf.set(uint8Array);
-    return newBuf
-  };
-
-  /**
-   * Efficient schema-less binary encoding with support for variable length encoding.
-   *
-   * Use [lib0/encoding] with [lib0/decoding]. Every encoding function has a corresponding decoding function.
-   *
-   * Encodes numbers in little-endian order (least to most significant byte order)
-   * and is compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
-   * which is also used in Protocol Buffers.
-   *
-   * ```js
-   * // encoding step
-   * const encoder = new encoding.createEncoder()
-   * encoding.writeVarUint(encoder, 256)
-   * encoding.writeVarString(encoder, 'Hello world!')
-   * const buf = encoding.toUint8Array(encoder)
-   * ```
-   *
-   * ```js
-   * // decoding step
-   * const decoder = new decoding.createDecoder(buf)
-   * decoding.readVarUint(decoder) // => 256
-   * decoding.readVarString(decoder) // => 'Hello world!'
-   * decoding.hasContent(decoder) // => false - all data is read
-   * ```
-   *
-   * @module encoding
-   */
-
-  /**
-   * A BinaryEncoder handles the encoding to an Uint8Array.
-   */
-  class Encoder {
-    constructor () {
-      this.cpos = 0;
-      this.cbuf = new Uint8Array(100);
-      /**
-       * @type {Array<Uint8Array>}
-       */
-      this.bufs = [];
-    }
-  }
-
-  /**
-   * @function
-   * @return {Encoder}
-   */
-  const createEncoder = () => new Encoder();
-
-  /**
-   * The current length of the encoded data.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @return {number}
-   */
-  const length$1 = encoder => {
-    let len = encoder.cpos;
-    for (let i = 0; i < encoder.bufs.length; i++) {
-      len += encoder.bufs[i].length;
-    }
-    return len
-  };
-
-  /**
-   * Transform to Uint8Array.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @return {Uint8Array} The created ArrayBuffer.
-   */
-  const toUint8Array = encoder => {
-    const uint8arr = new Uint8Array(length$1(encoder));
-    let curPos = 0;
-    for (let i = 0; i < encoder.bufs.length; i++) {
-      const d = encoder.bufs[i];
-      uint8arr.set(d, curPos);
-      curPos += d.length;
-    }
-    uint8arr.set(createUint8ArrayViewFromArrayBuffer(encoder.cbuf.buffer, 0, encoder.cpos), curPos);
-    return uint8arr
-  };
-
-  /**
-   * Verify that it is possible to write `len` bytes wtihout checking. If
-   * necessary, a new Buffer with the required length is attached.
-   *
-   * @param {Encoder} encoder
-   * @param {number} len
-   */
-  const verifyLen = (encoder, len) => {
-    const bufferLen = encoder.cbuf.length;
-    if (bufferLen - encoder.cpos < len) {
-      encoder.bufs.push(createUint8ArrayViewFromArrayBuffer(encoder.cbuf.buffer, 0, encoder.cpos));
-      encoder.cbuf = new Uint8Array(max(bufferLen, len) * 2);
-      encoder.cpos = 0;
-    }
-  };
-
-  /**
-   * Write one byte to the encoder.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {number} num The byte that is to be encoded.
-   */
-  const write = (encoder, num) => {
-    const bufferLen = encoder.cbuf.length;
-    if (encoder.cpos === bufferLen) {
-      encoder.bufs.push(encoder.cbuf);
-      encoder.cbuf = new Uint8Array(bufferLen * 2);
-      encoder.cpos = 0;
-    }
-    encoder.cbuf[encoder.cpos++] = num;
-  };
-
-  /**
-   * Write one byte as an unsigned integer.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {number} num The number that is to be encoded.
-   */
-  const writeUint8 = write;
-
-  /**
-   * Write a variable length unsigned integer. Max encodable integer is 2^53.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {number} num The number that is to be encoded.
-   */
-  const writeVarUint = (encoder, num) => {
-    while (num > BITS7) {
-      write(encoder, BIT8 | (BITS7 & num));
-      num = floor(num / 128); // shift >>> 7
-    }
-    write(encoder, BITS7 & num);
-  };
-
-  /**
-   * Write a variable length integer.
-   *
-   * We use the 7th bit instead for signaling that this is a negative number.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {number} num The number that is to be encoded.
-   */
-  const writeVarInt = (encoder, num) => {
-    const isNegative = isNegativeZero(num);
-    if (isNegative) {
-      num = -num;
-    }
-    //             |- whether to continue reading         |- whether is negative     |- number
-    write(encoder, (num > BITS6 ? BIT8 : 0) | (isNegative ? BIT7 : 0) | (BITS6 & num));
-    num = floor(num / 64); // shift >>> 6
-    // We don't need to consider the case of num === 0 so we can use a different
-    // pattern here than above.
-    while (num > 0) {
-      write(encoder, (num > BITS7 ? BIT8 : 0) | (BITS7 & num));
-      num = floor(num / 128); // shift >>> 7
-    }
-  };
-
-  /**
-   * A cache to store strings temporarily
-   */
-  const _strBuffer = new Uint8Array(30000);
-  const _maxStrBSize = _strBuffer.length / 3;
-
-  /**
-   * Write a variable length string.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {String} str The string that is to be encoded.
-   */
-  const _writeVarStringNative = (encoder, str) => {
-    if (str.length < _maxStrBSize) {
-      // We can encode the string into the existing buffer
-      /* istanbul ignore else */
-      const written = utf8TextEncoder.encodeInto(str, _strBuffer).written || 0;
-      writeVarUint(encoder, written);
-      for (let i = 0; i < written; i++) {
-        write(encoder, _strBuffer[i]);
-      }
-    } else {
-      writeVarUint8Array(encoder, encodeUtf8(str));
-    }
-  };
-
-  /**
-   * Write a variable length string.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {String} str The string that is to be encoded.
-   */
-  const _writeVarStringPolyfill = (encoder, str) => {
-    const encodedString = unescape(encodeURIComponent(str));
-    const len = encodedString.length;
-    writeVarUint(encoder, len);
-    for (let i = 0; i < len; i++) {
-      write(encoder, /** @type {number} */ (encodedString.codePointAt(i)));
-    }
-  };
-
-  /**
-   * Write a variable length string.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {String} str The string that is to be encoded.
-   */
-  /* istanbul ignore next */
-  const writeVarString = (utf8TextEncoder && utf8TextEncoder.encodeInto) ? _writeVarStringNative : _writeVarStringPolyfill;
-
-  /**
-   * Append fixed-length Uint8Array to the encoder.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {Uint8Array} uint8Array
-   */
-  const writeUint8Array = (encoder, uint8Array) => {
-    const bufferLen = encoder.cbuf.length;
-    const cpos = encoder.cpos;
-    const leftCopyLen = min(bufferLen - cpos, uint8Array.length);
-    const rightCopyLen = uint8Array.length - leftCopyLen;
-    encoder.cbuf.set(uint8Array.subarray(0, leftCopyLen), cpos);
-    encoder.cpos += leftCopyLen;
-    if (rightCopyLen > 0) {
-      // Still something to write, write right half..
-      // Append new buffer
-      encoder.bufs.push(encoder.cbuf);
-      // must have at least size of remaining buffer
-      encoder.cbuf = new Uint8Array(max(bufferLen * 2, rightCopyLen));
-      // copy array
-      encoder.cbuf.set(uint8Array.subarray(leftCopyLen));
-      encoder.cpos = rightCopyLen;
-    }
-  };
-
-  /**
-   * Append an Uint8Array to Encoder.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {Uint8Array} uint8Array
-   */
-  const writeVarUint8Array = (encoder, uint8Array) => {
-    writeVarUint(encoder, uint8Array.byteLength);
-    writeUint8Array(encoder, uint8Array);
-  };
-
-  /**
-   * Create an DataView of the next `len` bytes. Use it to write data after
-   * calling this function.
-   *
-   * ```js
-   * // write float32 using DataView
-   * const dv = writeOnDataView(encoder, 4)
-   * dv.setFloat32(0, 1.1)
-   * // read float32 using DataView
-   * const dv = readFromDataView(encoder, 4)
-   * dv.getFloat32(0) // => 1.100000023841858 (leaving it to the reader to find out why this is the correct result)
-   * ```
-   *
-   * @param {Encoder} encoder
-   * @param {number} len
-   * @return {DataView}
-   */
-  const writeOnDataView = (encoder, len) => {
-    verifyLen(encoder, len);
-    const dview = new DataView(encoder.cbuf.buffer, encoder.cpos, len);
-    encoder.cpos += len;
-    return dview
-  };
-
-  /**
-   * @param {Encoder} encoder
-   * @param {number} num
-   */
-  const writeFloat32 = (encoder, num) => writeOnDataView(encoder, 4).setFloat32(0, num, false);
-
-  /**
-   * @param {Encoder} encoder
-   * @param {number} num
-   */
-  const writeFloat64 = (encoder, num) => writeOnDataView(encoder, 8).setFloat64(0, num, false);
-
-  /**
-   * @param {Encoder} encoder
-   * @param {bigint} num
-   */
-  const writeBigInt64 = (encoder, num) => /** @type {any} */ (writeOnDataView(encoder, 8)).setBigInt64(0, num, false);
-
-  const floatTestBed = new DataView(new ArrayBuffer(4));
-  /**
-   * Check if a number can be encoded as a 32 bit float.
-   *
-   * @param {number} num
-   * @return {boolean}
-   */
-  const isFloat32 = num => {
-    floatTestBed.setFloat32(0, num);
-    return floatTestBed.getFloat32(0) === num
-  };
-
-  /**
-   * Encode data with efficient binary format.
-   *
-   * Differences to JSON:
-   * • Transforms data to a binary format (not to a string)
-   * • Encodes undefined, NaN, and ArrayBuffer (these can't be represented in JSON)
-   * • Numbers are efficiently encoded either as a variable length integer, as a
-   *   32 bit float, as a 64 bit float, or as a 64 bit bigint.
-   *
-   * Encoding table:
-   *
-   * | Data Type           | Prefix   | Encoding Method    | Comment |
-   * | ------------------- | -------- | ------------------ | ------- |
-   * | undefined           | 127      |                    | Functions, symbol, and everything that cannot be identified is encoded as undefined |
-   * | null                | 126      |                    | |
-   * | integer             | 125      | writeVarInt        | Only encodes 32 bit signed integers |
-   * | float32             | 124      | writeFloat32       | |
-   * | float64             | 123      | writeFloat64       | |
-   * | bigint              | 122      | writeBigInt64      | |
-   * | boolean (false)     | 121      |                    | True and false are different data types so we save the following byte |
-   * | boolean (true)      | 120      |                    | - 0b01111000 so the last bit determines whether true or false |
-   * | string              | 119      | writeVarString     | |
-   * | object<string,any>  | 118      | custom             | Writes {length} then {length} key-value pairs |
-   * | array<any>          | 117      | custom             | Writes {length} then {length} json values |
-   * | Uint8Array          | 116      | writeVarUint8Array | We use Uint8Array for any kind of binary data |
-   *
-   * Reasons for the decreasing prefix:
-   * We need the first bit for extendability (later we may want to encode the
-   * prefix with writeVarUint). The remaining 7 bits are divided as follows:
-   * [0-30]   the beginning of the data range is used for custom purposes
-   *          (defined by the function that uses this library)
-   * [31-127] the end of the data range is used for data encoding by
-   *          lib0/encoding.js
-   *
-   * @param {Encoder} encoder
-   * @param {undefined|null|number|bigint|boolean|string|Object<string,any>|Array<any>|Uint8Array} data
-   */
-  const writeAny = (encoder, data) => {
-    switch (typeof data) {
-      case 'string':
-        // TYPE 119: STRING
-        write(encoder, 119);
-        writeVarString(encoder, data);
-        break
-      case 'number':
-        if (isInteger(data) && abs(data) <= BITS31) {
-          // TYPE 125: INTEGER
-          write(encoder, 125);
-          writeVarInt(encoder, data);
-        } else if (isFloat32(data)) {
-          // TYPE 124: FLOAT32
-          write(encoder, 124);
-          writeFloat32(encoder, data);
-        } else {
-          // TYPE 123: FLOAT64
-          write(encoder, 123);
-          writeFloat64(encoder, data);
-        }
-        break
-      case 'bigint':
-        // TYPE 122: BigInt
-        write(encoder, 122);
-        writeBigInt64(encoder, data);
-        break
-      case 'object':
-        if (data === null) {
-          // TYPE 126: null
-          write(encoder, 126);
-        } else if (data instanceof Array) {
-          // TYPE 117: Array
-          write(encoder, 117);
-          writeVarUint(encoder, data.length);
-          for (let i = 0; i < data.length; i++) {
-            writeAny(encoder, data[i]);
-          }
-        } else if (data instanceof Uint8Array) {
-          // TYPE 116: ArrayBuffer
-          write(encoder, 116);
-          writeVarUint8Array(encoder, data);
-        } else {
-          // TYPE 118: Object
-          write(encoder, 118);
-          const keys = Object.keys(data);
-          writeVarUint(encoder, keys.length);
-          for (let i = 0; i < keys.length; i++) {
-            const key = keys[i];
-            writeVarString(encoder, key);
-            writeAny(encoder, data[key]);
-          }
-        }
-        break
-      case 'boolean':
-        // TYPE 120/121: boolean (true/false)
-        write(encoder, data ? 120 : 121);
-        break
-      default:
-        // TYPE 127: undefined
-        write(encoder, 127);
-    }
-  };
-
-  /**
-   * Now come a few stateful encoder that have their own classes.
-   */
-
-  /**
-   * Basic Run Length Encoder - a basic compression implementation.
-   *
-   * Encodes [1,1,1,7] to [1,3,7,1] (3 times 1, 1 time 7). This encoder might do more harm than good if there are a lot of values that are not repeated.
-   *
-   * It was originally used for image compression. Cool .. article http://csbruce.com/cbm/transactor/pdfs/trans_v7_i06.pdf
-   *
-   * @note T must not be null!
-   *
-   * @template T
-   */
-  class RleEncoder extends Encoder {
-    /**
-     * @param {function(Encoder, T):void} writer
-     */
-    constructor (writer) {
-      super();
-      /**
-       * The writer
-       */
-      this.w = writer;
-      /**
-       * Current state
-       * @type {T|null}
-       */
-      this.s = null;
-      this.count = 0;
-    }
-
-    /**
-     * @param {T} v
-     */
-    write (v) {
-      if (this.s === v) {
-        this.count++;
-      } else {
-        if (this.count > 0) {
-          // flush counter, unless this is the first value (count = 0)
-          writeVarUint(this, this.count - 1); // since count is always > 0, we can decrement by one. non-standard encoding ftw
-        }
-        this.count = 1;
-        // write first value
-        this.w(this, v);
-        this.s = v;
-      }
-    }
-  }
-
-  /**
-   * @param {UintOptRleEncoder} encoder
-   */
-  const flushUintOptRleEncoder = encoder => {
-    /* istanbul ignore else */
-    if (encoder.count > 0) {
-      // flush counter, unless this is the first value (count = 0)
-      // case 1: just a single value. set sign to positive
-      // case 2: write several values. set sign to negative to indicate that there is a length coming
-      writeVarInt(encoder.encoder, encoder.count === 1 ? encoder.s : -encoder.s);
-      if (encoder.count > 1) {
-        writeVarUint(encoder.encoder, encoder.count - 2); // since count is always > 1, we can decrement by one. non-standard encoding ftw
-      }
-    }
-  };
-
-  /**
-   * Optimized Rle encoder that does not suffer from the mentioned problem of the basic Rle encoder.
-   *
-   * Internally uses VarInt encoder to write unsigned integers. If the input occurs multiple times, we write
-   * write it as a negative number. The UintOptRleDecoder then understands that it needs to read a count.
-   *
-   * Encodes [1,2,3,3,3] as [1,2,-3,3] (once 1, once 2, three times 3)
-   */
-  class UintOptRleEncoder {
-    constructor () {
-      this.encoder = new Encoder();
-      /**
-       * @type {number}
-       */
-      this.s = 0;
-      this.count = 0;
-    }
-
-    /**
-     * @param {number} v
-     */
-    write (v) {
-      if (this.s === v) {
-        this.count++;
-      } else {
-        flushUintOptRleEncoder(this);
-        this.count = 1;
-        this.s = v;
-      }
-    }
-
-    toUint8Array () {
-      flushUintOptRleEncoder(this);
-      return toUint8Array(this.encoder)
-    }
-  }
-
-  /**
-   * @param {IntDiffOptRleEncoder} encoder
-   */
-  const flushIntDiffOptRleEncoder = encoder => {
-    if (encoder.count > 0) {
-      //          31 bit making up the diff | wether to write the counter
-      // const encodedDiff = encoder.diff << 1 | (encoder.count === 1 ? 0 : 1)
-      const encodedDiff = encoder.diff * 2 + (encoder.count === 1 ? 0 : 1);
-      // flush counter, unless this is the first value (count = 0)
-      // case 1: just a single value. set first bit to positive
-      // case 2: write several values. set first bit to negative to indicate that there is a length coming
-      writeVarInt(encoder.encoder, encodedDiff);
-      if (encoder.count > 1) {
-        writeVarUint(encoder.encoder, encoder.count - 2); // since count is always > 1, we can decrement by one. non-standard encoding ftw
-      }
-    }
-  };
-
-  /**
-   * A combination of the IntDiffEncoder and the UintOptRleEncoder.
-   *
-   * The count approach is similar to the UintDiffOptRleEncoder, but instead of using the negative bitflag, it encodes
-   * in the LSB whether a count is to be read. Therefore this Encoder only supports 31 bit integers!
-   *
-   * Encodes [1, 2, 3, 2] as [3, 1, 6, -1] (more specifically [(1 << 1) | 1, (3 << 0) | 0, -1])
-   *
-   * Internally uses variable length encoding. Contrary to normal UintVar encoding, the first byte contains:
-   * * 1 bit that denotes whether the next value is a count (LSB)
-   * * 1 bit that denotes whether this value is negative (MSB - 1)
-   * * 1 bit that denotes whether to continue reading the variable length integer (MSB)
-   *
-   * Therefore, only five bits remain to encode diff ranges.
-   *
-   * Use this Encoder only when appropriate. In most cases, this is probably a bad idea.
-   */
-  class IntDiffOptRleEncoder {
-    constructor () {
-      this.encoder = new Encoder();
-      /**
-       * @type {number}
-       */
-      this.s = 0;
-      this.count = 0;
-      this.diff = 0;
-    }
-
-    /**
-     * @param {number} v
-     */
-    write (v) {
-      if (this.diff === v - this.s) {
-        this.s = v;
-        this.count++;
-      } else {
-        flushIntDiffOptRleEncoder(this);
-        this.count = 1;
-        this.diff = v - this.s;
-        this.s = v;
-      }
-    }
-
-    toUint8Array () {
-      flushIntDiffOptRleEncoder(this);
-      return toUint8Array(this.encoder)
-    }
-  }
-
-  /**
-   * Optimized String Encoder.
-   *
-   * Encoding many small strings in a simple Encoder is not very efficient. The function call to decode a string takes some time and creates references that must be eventually deleted.
-   * In practice, when decoding several million small strings, the GC will kick in more and more often to collect orphaned string objects (or maybe there is another reason?).
-   *
-   * This string encoder solves the above problem. All strings are concatenated and written as a single string using a single encoding call.
-   *
-   * The lengths are encoded using a UintOptRleEncoder.
-   */
-  class StringEncoder {
-    constructor () {
-      /**
-       * @type {Array<string>}
-       */
-      this.sarr = [];
-      this.s = '';
-      this.lensE = new UintOptRleEncoder();
-    }
-
-    /**
-     * @param {string} string
-     */
-    write (string) {
-      this.s += string;
-      if (this.s.length > 19) {
-        this.sarr.push(this.s);
-        this.s = '';
-      }
-      this.lensE.write(string.length);
-    }
-
-    toUint8Array () {
-      const encoder = new Encoder();
-      this.sarr.push(this.s);
-      this.s = '';
-      writeVarString(encoder, this.sarr.join(''));
-      writeUint8Array(encoder, this.lensE.toUint8Array());
-      return toUint8Array(encoder)
-    }
-  }
-
   /* eslint-env browser */
-
-  const isoCrypto = typeof crypto === 'undefined' ? null : crypto;
+  const getRandomValues = crypto.getRandomValues.bind(crypto);
 
   /**
-   * @type {function(number):ArrayBuffer}
+   * Isomorphic module for true random numbers / buffers / uuids.
+   *
+   * Attention: falls back to Math.random if the browser does not support crypto.
+   *
+   * @module random
    */
-  const cryptoRandomBuffer = isoCrypto !== null
-    ? len => {
-      // browser
-      const buf = new ArrayBuffer(len);
-      const arr = new Uint8Array(buf);
-      isoCrypto.getRandomValues(arr);
-      return buf
-    }
-    : len => {
-      // polyfill
-      const buf = new ArrayBuffer(len);
-      const arr = new Uint8Array(buf);
-      for (let i = 0; i < len; i++) {
-        arr[i] = Math.ceil((Math.random() * 0xFFFFFFFF) >>> 0);
-      }
-      return buf
-    };
 
   const rand = Math.random;
 
-  const uint32 = () => new Uint32Array(cryptoRandomBuffer(4))[0];
+  const uint32 = () => getRandomValues(new Uint32Array(1))[0];
 
   // @ts-ignore
   const uuidv4Template = [1e7] + -1e3 + -4e3 + -8e3 + -1e11;
+
+  /**
+   * @return {string}
+   */
   const uuidv4 = () => uuidv4Template.replace(/[018]/g, /** @param {number} c */ c =>
     (c ^ uint32() & 15 >> c / 4).toString(16)
   );
@@ -1953,6 +1585,15 @@
   const create$3 = f => /** @type {Promise<T>} */ (new Promise(f));
 
   /**
+   * `Promise.all` wait for all promises in the array to resolve and return the result
+   * @template {unknown[] | []} PS
+   *
+   * @param {PS} ps
+   * @return {Promise<{ -readonly [P in keyof PS]: Awaited<PS[P]> }>}
+   */
+  const all = Promise.all.bind(Promise);
+
+  /**
    * @param {Error} [reason]
    * @return {Promise<never>}
    */
@@ -1966,17 +1607,494 @@
   const resolve = res => Promise.resolve(res);
 
   /**
-   * Utility module to work with EcmaScript Symbols.
+   * Often used conditions.
    *
-   * @module symbol
+   * @module conditions
    */
 
   /**
-   * Return fresh symbol.
-   *
-   * @return {Symbol}
+   * @template T
+   * @param {T|null|undefined} v
+   * @return {T|null}
    */
-  const create$4 = Symbol;
+  /* c8 ignore next */
+  const undefinedToNull = v => v === undefined ? null : v;
+
+  /* eslint-env browser */
+
+  /**
+   * Isomorphic variable storage.
+   *
+   * Uses LocalStorage in the browser and falls back to in-memory storage.
+   *
+   * @module storage
+   */
+
+  /* c8 ignore start */
+  class VarStoragePolyfill {
+    constructor () {
+      this.map = new Map();
+    }
+
+    /**
+     * @param {string} key
+     * @param {any} newValue
+     */
+    setItem (key, newValue) {
+      this.map.set(key, newValue);
+    }
+
+    /**
+     * @param {string} key
+     */
+    getItem (key) {
+      return this.map.get(key)
+    }
+  }
+  /* c8 ignore stop */
+
+  /**
+   * @type {any}
+   */
+  let _localStorage = new VarStoragePolyfill();
+  let usePolyfill = true;
+
+  /* c8 ignore start */
+  try {
+    // if the same-origin rule is violated, accessing localStorage might thrown an error
+    if (typeof localStorage !== 'undefined' && localStorage) {
+      _localStorage = localStorage;
+      usePolyfill = false;
+    }
+  } catch (e) { }
+  /* c8 ignore stop */
+
+  /**
+   * This is basically localStorage in browser, or a polyfill in nodejs
+   */
+  /* c8 ignore next */
+  const varStorage = _localStorage;
+
+  /**
+   * A polyfill for `addEventListener('storage', event => {..})` that does nothing if the polyfill is being used.
+   *
+   * @param {function({ key: string, newValue: string, oldValue: string }): void} eventHandler
+   * @function
+   */
+  /* c8 ignore next */
+  const onChange = eventHandler => usePolyfill || addEventListener('storage', /** @type {any} */ (eventHandler));
+
+  /**
+   * A polyfill for `removeEventListener('storage', event => {..})` that does nothing if the polyfill is being used.
+   *
+   * @param {function({ key: string, newValue: string, oldValue: string }): void} eventHandler
+   * @function
+   */
+  /* c8 ignore next */
+  const offChange = eventHandler => usePolyfill || removeEventListener('storage', /** @type {any} */ (eventHandler));
+
+  /**
+   * Utility functions for working with EcmaScript objects.
+   *
+   * @module object
+   */
+
+  /**
+   * Object.assign
+   */
+  const assign = Object.assign;
+
+  /**
+   * @param {Object<string,any>} obj
+   */
+  const keys = Object.keys;
+
+  /**
+   * @template V
+   * @param {{[k:string]:V}} obj
+   * @param {function(V,string):any} f
+   */
+  const forEach = (obj, f) => {
+    for (const key in obj) {
+      f(obj[key], key);
+    }
+  };
+
+  /**
+   * @param {Object<string,any>} obj
+   * @return {number}
+   */
+  const length$1 = obj => keys(obj).length;
+
+  /**
+   * @param {Object|undefined} obj
+   */
+  const isEmpty = obj => {
+    // eslint-disable-next-line
+    for (const _k in obj) {
+      return false
+    }
+    return true
+  };
+
+  /**
+   * @param {Object<string,any>} obj
+   * @param {function(any,string):boolean} f
+   * @return {boolean}
+   */
+  const every = (obj, f) => {
+    for (const key in obj) {
+      if (!f(obj[key], key)) {
+        return false
+      }
+    }
+    return true
+  };
+
+  /**
+   * Calls `Object.prototype.hasOwnProperty`.
+   *
+   * @param {any} obj
+   * @param {string|symbol} key
+   * @return {boolean}
+   */
+  const hasProperty = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+  /**
+   * @param {Object<string,any>} a
+   * @param {Object<string,any>} b
+   * @return {boolean}
+   */
+  const equalFlat = (a, b) => a === b || (length$1(a) === length$1(b) && every(a, (val, key) => (val !== undefined || hasProperty(b, key)) && b[key] === val));
+
+  /**
+   * Common functions and function call helpers.
+   *
+   * @module function
+   */
+
+  /**
+   * Calls all functions in `fs` with args. Only throws after all functions were called.
+   *
+   * @param {Array<function>} fs
+   * @param {Array<any>} args
+   */
+  const callAll = (fs, args, i = 0) => {
+    try {
+      for (; i < fs.length; i++) {
+        fs[i](...args);
+      }
+    } finally {
+      if (i < fs.length) {
+        callAll(fs, args, i + 1);
+      }
+    }
+  };
+
+  const nop = () => {};
+
+  /**
+   * @template A
+   *
+   * @param {A} a
+   * @return {A}
+   */
+  const id = a => a;
+
+  /**
+   * @template T
+   *
+   * @param {T} a
+   * @param {T} b
+   * @return {boolean}
+   */
+  const equalityStrict = (a, b) => a === b;
+
+  /* c8 ignore start */
+
+  /**
+   * @param {any} a
+   * @param {any} b
+   * @return {boolean}
+   */
+  const equalityDeep = (a, b) => {
+    if (a == null || b == null) {
+      return equalityStrict(a, b)
+    }
+    if (a.constructor !== b.constructor) {
+      return false
+    }
+    if (a === b) {
+      return true
+    }
+    switch (a.constructor) {
+      case ArrayBuffer:
+        a = new Uint8Array(a);
+        b = new Uint8Array(b);
+      // eslint-disable-next-line no-fallthrough
+      case Uint8Array: {
+        if (a.byteLength !== b.byteLength) {
+          return false
+        }
+        for (let i = 0; i < a.length; i++) {
+          if (a[i] !== b[i]) {
+            return false
+          }
+        }
+        break
+      }
+      case Set: {
+        if (a.size !== b.size) {
+          return false
+        }
+        for (const value of a) {
+          if (!b.has(value)) {
+            return false
+          }
+        }
+        break
+      }
+      case Map: {
+        if (a.size !== b.size) {
+          return false
+        }
+        for (const key of a.keys()) {
+          if (!b.has(key) || !equalityDeep(a.get(key), b.get(key))) {
+            return false
+          }
+        }
+        break
+      }
+      case Object:
+        if (length$1(a) !== length$1(b)) {
+          return false
+        }
+        for (const key in a) {
+          if (!hasProperty(a, key) || !equalityDeep(a[key], b[key])) {
+            return false
+          }
+        }
+        break
+      case Array:
+        if (a.length !== b.length) {
+          return false
+        }
+        for (let i = 0; i < a.length; i++) {
+          if (!equalityDeep(a[i], b[i])) {
+            return false
+          }
+        }
+        break
+      default:
+        return false
+    }
+    return true
+  };
+
+  /**
+   * @template V
+   * @template {V} OPTS
+   *
+   * @param {V} value
+   * @param {Array<OPTS>} options
+   */
+  // @ts-ignore
+  const isOneOf = (value, options) => options.includes(value);
+
+  /**
+   * Isomorphic module to work access the environment (query params, env variables).
+   *
+   * @module map
+   */
+
+  /* c8 ignore next 2 */
+  // @ts-ignore
+  const isNode = typeof process !== 'undefined' && process.release && /node|io\.js/.test(process.release.name) && Object.prototype.toString.call(typeof process !== 'undefined' ? process : 0) === '[object process]';
+
+  /* c8 ignore next */
+  const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined' && !isNode;
+  /* c8 ignore next 3 */
+  const isMac = typeof navigator !== 'undefined'
+    ? /Mac/.test(navigator.platform)
+    : false;
+
+  /**
+   * @type {Map<string,string>}
+   */
+  let params;
+
+  /* c8 ignore start */
+  const computeParams = () => {
+    if (params === undefined) {
+      if (isNode) {
+        params = create();
+        const pargs = process.argv;
+        let currParamName = null;
+        for (let i = 0; i < pargs.length; i++) {
+          const parg = pargs[i];
+          if (parg[0] === '-') {
+            if (currParamName !== null) {
+              params.set(currParamName, '');
+            }
+            currParamName = parg;
+          } else {
+            if (currParamName !== null) {
+              params.set(currParamName, parg);
+              currParamName = null;
+            }
+          }
+        }
+        if (currParamName !== null) {
+          params.set(currParamName, '');
+        }
+        // in ReactNative for example this would not be true (unless connected to the Remote Debugger)
+      } else if (typeof location === 'object') {
+        params = create(); // eslint-disable-next-line no-undef
+        (location.search || '?').slice(1).split('&').forEach((kv) => {
+          if (kv.length !== 0) {
+            const [key, value] = kv.split('=');
+            params.set(`--${fromCamelCase(key, '-')}`, value);
+            params.set(`-${fromCamelCase(key, '-')}`, value);
+          }
+        });
+      } else {
+        params = create();
+      }
+    }
+    return params
+  };
+  /* c8 ignore stop */
+
+  /**
+   * @param {string} name
+   * @return {boolean}
+   */
+  /* c8 ignore next */
+  const hasParam = (name) => computeParams().has(name);
+
+  /**
+   * @param {string} name
+   * @return {string|null}
+   */
+  /* c8 ignore next 4 */
+  const getVariable = (name) =>
+    isNode
+      ? undefinedToNull(process.env[name.toUpperCase()])
+      : undefinedToNull(varStorage.getItem(name));
+
+  /**
+   * @param {string} name
+   * @return {boolean}
+   */
+  /* c8 ignore next 2 */
+  const hasConf = (name) =>
+    hasParam('--' + name) || getVariable(name) !== null;
+
+  /* c8 ignore next */
+  const production = hasConf('production');
+
+  /* c8 ignore next 2 */
+  const forceColor = isNode &&
+    isOneOf(process.env.FORCE_COLOR, ['true', '1', '2']);
+
+  /* c8 ignore start */
+  const supportsColor = !hasParam('no-colors') &&
+    (!isNode || process.stdout.isTTY || forceColor) && (
+    !isNode || hasParam('color') || forceColor ||
+      getVariable('COLORTERM') !== null ||
+      (getVariable('TERM') || '').includes('color')
+  );
+  /* c8 ignore stop */
+
+  /**
+   * Utility functions to work with buffers (Uint8Array).
+   *
+   * @module buffer
+   */
+
+  /**
+   * @param {number} len
+   */
+  const createUint8ArrayFromLen = len => new Uint8Array(len);
+
+  /**
+   * Create Uint8Array with initial content from buffer
+   *
+   * @param {ArrayBuffer} buffer
+   * @param {number} byteOffset
+   * @param {number} length
+   */
+  const createUint8ArrayViewFromArrayBuffer = (buffer, byteOffset, length) => new Uint8Array(buffer, byteOffset, length);
+
+  /**
+   * Create Uint8Array with initial content from buffer
+   *
+   * @param {ArrayBuffer} buffer
+   */
+  const createUint8ArrayFromArrayBuffer = buffer => new Uint8Array(buffer);
+
+  /* c8 ignore start */
+  /**
+   * @param {Uint8Array} bytes
+   * @return {string}
+   */
+  const toBase64Browser = bytes => {
+    let s = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      s += fromCharCode(bytes[i]);
+    }
+    // eslint-disable-next-line no-undef
+    return btoa(s)
+  };
+  /* c8 ignore stop */
+
+  /**
+   * @param {Uint8Array} bytes
+   * @return {string}
+   */
+  const toBase64Node = bytes => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64');
+
+  /* c8 ignore start */
+  /**
+   * @param {string} s
+   * @return {Uint8Array}
+   */
+  const fromBase64Browser = s => {
+    // eslint-disable-next-line no-undef
+    const a = atob(s);
+    const bytes = createUint8ArrayFromLen(a.length);
+    for (let i = 0; i < a.length; i++) {
+      bytes[i] = a.charCodeAt(i);
+    }
+    return bytes
+  };
+  /* c8 ignore stop */
+
+  /**
+   * @param {string} s
+   */
+  const fromBase64Node = s => {
+    const buf = Buffer.from(s, 'base64');
+    return createUint8ArrayViewFromArrayBuffer(buf.buffer, buf.byteOffset, buf.byteLength)
+  };
+
+  /* c8 ignore next */
+  const toBase64 = isBrowser ? toBase64Browser : toBase64Node;
+
+  /* c8 ignore next */
+  const fromBase64 = isBrowser ? fromBase64Browser : fromBase64Node;
+
+  /**
+   * Copy the content of an Uint8Array view to a new ArrayBuffer.
+   *
+   * @param {Uint8Array} uint8Array
+   * @return {Uint8Array}
+   */
+  const copyUint8Array = uint8Array => {
+    const newBuf = createUint8ArrayFromLen(uint8Array.byteLength);
+    newBuf.set(uint8Array);
+    return newBuf
+  };
 
   /**
    * Working with value pairs.
@@ -2004,19 +2122,100 @@
    * @param {R} right
    * @return {Pair<L,R>}
    */
-  const create$5 = (left, right) => new Pair(left, right);
+  const create$4 = (left, right) => new Pair(left, right);
 
   /* eslint-env browser */
 
-  /* istanbul ignore next */
   const domParser = /** @type {DOMParser} */ (typeof DOMParser !== 'undefined' ? new DOMParser() : null);
 
   /**
    * @param {Map<string,string>} m
    * @return {string}
    */
-  /* istanbul ignore next */
   const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
+  /* c8 ignore stop */
+
+  /**
+   * Utility module to work with EcmaScript Symbols.
+   *
+   * @module symbol
+   */
+
+  /**
+   * Return fresh symbol.
+   *
+   * @return {Symbol}
+   */
+  const create$5 = Symbol;
+
+  const BOLD = create$5();
+  const UNBOLD = create$5();
+  const BLUE = create$5();
+  const GREY = create$5();
+  const GREEN = create$5();
+  const RED = create$5();
+  const PURPLE = create$5();
+  const ORANGE = create$5();
+  const UNCOLOR = create$5();
+
+  /* c8 ignore start */
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   * @return {Array<string|object|number>}
+   */
+  const computeNoColorLoggingArgs = args => {
+    const logArgs = [];
+    // try with formatting until we find something unsupported
+    let i = 0;
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      if (arg.constructor === String || arg.constructor === Number) ; else if (arg.constructor === Object) {
+        logArgs.push(JSON.stringify(arg));
+      }
+    }
+    return logArgs
+  };
+  /* c8 ignore stop */
+
+  const loggingColors = [GREEN, PURPLE, ORANGE, BLUE];
+  let nextColor = 0;
+  let lastLoggingTime = getUnixTime();
+
+  /* c8 ignore start */
+  /**
+   * @param {function(...any):void} _print
+   * @param {string} moduleName
+   * @return {function(...any):void}
+   */
+  const createModuleLogger = (_print, moduleName) => {
+    const color = loggingColors[nextColor];
+    const debugRegexVar = getVariable('log');
+    const doLogging = debugRegexVar !== null &&
+      (debugRegexVar === '*' || debugRegexVar === 'true' ||
+        new RegExp(debugRegexVar, 'gi').test(moduleName));
+    nextColor = (nextColor + 1) % loggingColors.length;
+    moduleName += ': ';
+    return !doLogging
+      ? nop
+      : (...args) => {
+          const timeNow = getUnixTime();
+          const timeDiff = timeNow - lastLoggingTime;
+          lastLoggingTime = timeNow;
+          _print(
+            color,
+            moduleName,
+            UNCOLOR,
+            ...args.map((arg) =>
+              (typeof arg === 'string' || typeof arg === 'symbol')
+                ? arg
+                : JSON.stringify(arg)
+            ),
+            color,
+            ' +' + timeDiff + 'ms'
+          );
+        }
+  };
+  /* c8 ignore stop */
 
   /**
    * Isomorphic logging module with support for colors!
@@ -2024,48 +2223,26 @@
    * @module logging
    */
 
-  const BOLD = create$4();
-  const UNBOLD = create$4();
-  const BLUE = create$4();
-  const GREY = create$4();
-  const GREEN = create$4();
-  const RED = create$4();
-  const PURPLE = create$4();
-  const ORANGE = create$4();
-  const UNCOLOR = create$4();
-
   /**
    * @type {Object<Symbol,pair.Pair<string,string>>}
    */
   const _browserStyleMap = {
-    [BOLD]: create$5('font-weight', 'bold'),
-    [UNBOLD]: create$5('font-weight', 'normal'),
-    [BLUE]: create$5('color', 'blue'),
-    [GREEN]: create$5('color', 'green'),
-    [GREY]: create$5('color', 'grey'),
-    [RED]: create$5('color', 'red'),
-    [PURPLE]: create$5('color', 'purple'),
-    [ORANGE]: create$5('color', 'orange'), // not well supported in chrome when debugging node with inspector - TODO: deprecate
-    [UNCOLOR]: create$5('color', 'black')
+    [BOLD]: create$4('font-weight', 'bold'),
+    [UNBOLD]: create$4('font-weight', 'normal'),
+    [BLUE]: create$4('color', 'blue'),
+    [GREEN]: create$4('color', 'green'),
+    [GREY]: create$4('color', 'grey'),
+    [RED]: create$4('color', 'red'),
+    [PURPLE]: create$4('color', 'purple'),
+    [ORANGE]: create$4('color', 'orange'), // not well supported in chrome when debugging node with inspector - TODO: deprecate
+    [UNCOLOR]: create$4('color', 'black')
   };
 
-  const _nodeStyleMap = {
-    [BOLD]: '\u001b[1m',
-    [UNBOLD]: '\u001b[2m',
-    [BLUE]: '\x1b[34m',
-    [GREEN]: '\x1b[32m',
-    [GREY]: '\u001b[37m',
-    [RED]: '\x1b[31m',
-    [PURPLE]: '\x1b[35m',
-    [ORANGE]: '\x1b[38;5;208m',
-    [UNCOLOR]: '\x1b[0m'
-  };
-
-  /* istanbul ignore next */
   /**
    * @param {Array<string|Symbol|Object|number>} args
    * @return {Array<string|object|number>}
    */
+  /* c8 ignore start */
   const computeBrowserLoggingArgs = (args) => {
     const strBuilder = [];
     const styles = [];
@@ -2076,7 +2253,6 @@
     let logArgs = [];
     // try with formatting until we find something unsupported
     let i = 0;
-
     for (; i < args.length; i++) {
       const arg = args[i];
       // @ts-ignore
@@ -2097,7 +2273,6 @@
         }
       }
     }
-
     if (i > 0) {
       // create logArgs with what we have so far
       logArgs = styles;
@@ -2112,142 +2287,30 @@
     }
     return logArgs
   };
+  /* c8 ignore stop */
 
-  /* istanbul ignore next */
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<string|object|number>}
-   */
-  const computeNoColorLoggingArgs = args => {
-    const strBuilder = [];
-    const logArgs = [];
-
-    // try with formatting until we find something unsupported
-    let i = 0;
-
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      // @ts-ignore
-      const style = _nodeStyleMap[arg];
-      if (style === undefined) {
-        if (arg.constructor === String || arg.constructor === Number) {
-          strBuilder.push(arg);
-        } else {
-          break
-        }
-      }
-    }
-    if (i > 0) {
-      logArgs.push(strBuilder.join(''));
-    }
-    // append the rest
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      /* istanbul ignore else */
-      if (!(arg instanceof Symbol)) {
-        if (arg.constructor === Object) {
-          logArgs.push(JSON.stringify(arg));
-        } else {
-          logArgs.push(arg);
-        }
-      }
-    }
-    return logArgs
-  };
-
-  /* istanbul ignore next */
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<string|object|number>}
-   */
-  const computeNodeLoggingArgs = (args) => {
-    const strBuilder = [];
-    const logArgs = [];
-
-    // try with formatting until we find something unsupported
-    let i = 0;
-
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      // @ts-ignore
-      const style = _nodeStyleMap[arg];
-      if (style !== undefined) {
-        strBuilder.push(style);
-      } else {
-        if (arg.constructor === String || arg.constructor === Number) {
-          strBuilder.push(arg);
-        } else {
-          break
-        }
-      }
-    }
-    if (i > 0) {
-      // create logArgs with what we have so far
-      strBuilder.push('\x1b[0m');
-      logArgs.push(strBuilder.join(''));
-    }
-    // append the rest
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      /* istanbul ignore else */
-      if (!(arg instanceof Symbol)) {
-        logArgs.push(arg);
-      }
-    }
-    return logArgs
-  };
-
-  /* istanbul ignore next */
+  /* c8 ignore start */
   const computeLoggingArgs = supportsColor
-    ? (isNode ? computeNodeLoggingArgs : computeBrowserLoggingArgs)
+    ? computeBrowserLoggingArgs
     : computeNoColorLoggingArgs;
+  /* c8 ignore stop */
 
   /**
    * @param {Array<string|Symbol|Object|number>} args
    */
   const print = (...args) => {
     console.log(...computeLoggingArgs(args));
-    /* istanbul ignore next */
+    /* c8 ignore next */
     vconsoles.forEach((vc) => vc.print(args));
   };
 
-  const vconsoles = new Set();
-
-  const loggingColors = [GREEN, PURPLE, ORANGE, BLUE];
-  let nextColor = 0;
-  let lastLoggingTime = getUnixTime();
+  const vconsoles = create$1();
 
   /**
    * @param {string} moduleName
    * @return {function(...any):void}
    */
-  const createModuleLogger = (moduleName) => {
-    const color = loggingColors[nextColor];
-    const debugRegexVar = getVariable('log');
-    const doLogging = debugRegexVar !== null &&
-      (debugRegexVar === '*' || debugRegexVar === 'true' ||
-        new RegExp(debugRegexVar, 'gi').test(moduleName));
-    nextColor = (nextColor + 1) % loggingColors.length;
-    moduleName += ': ';
-
-    return !doLogging ? nop : (...args) => {
-      const timeNow = getUnixTime();
-      const timeDiff = timeNow - lastLoggingTime;
-      lastLoggingTime = timeNow;
-      print(
-        color,
-        moduleName,
-        UNCOLOR,
-        ...args.map((arg) =>
-          (typeof arg === 'string' || typeof arg === 'symbol')
-            ? arg
-            : JSON.stringify(arg)
-        ),
-        color,
-        ' +' + timeDiff + 'ms'
-      );
-    }
-  };
+  const createModuleLogger$1 = (moduleName) => createModuleLogger(print, moduleName);
 
   /**
    * Utility module to create and manipulate Iterators.
@@ -2451,7 +2514,7 @@
    * @function
    */
   const addToDeleteSet = (ds, client, clock, length) => {
-    setIfUndefined(ds.clients, client, () => []).push(new DeleteItem(clock, length));
+    setIfUndefined(ds.clients, client, () => /** @type {Array<DeleteItem>} */ ([])).push(new DeleteItem(clock, length));
   };
 
   const createDeleteSet = () => new DeleteSet();
@@ -2499,17 +2562,21 @@
    */
   const writeDeleteSet = (encoder, ds) => {
     writeVarUint(encoder.restEncoder, ds.clients.size);
-    ds.clients.forEach((dsitems, client) => {
-      encoder.resetDsCurVal();
-      writeVarUint(encoder.restEncoder, client);
-      const len = dsitems.length;
-      writeVarUint(encoder.restEncoder, len);
-      for (let i = 0; i < len; i++) {
-        const item = dsitems[i];
-        encoder.writeDsClock(item.clock);
-        encoder.writeDsLen(item.len);
-      }
-    });
+
+    // Ensure that the delete set is written in a deterministic order
+    from(ds.clients.entries())
+      .sort((a, b) => b[0] - a[0])
+      .forEach(([client, dsitems]) => {
+        encoder.resetDsCurVal();
+        writeVarUint(encoder.restEncoder, client);
+        const len = dsitems.length;
+        writeVarUint(encoder.restEncoder, len);
+        for (let i = 0; i < len; i++) {
+          const item = dsitems[i];
+          encoder.writeDsClock(item.clock);
+          encoder.writeDsLen(item.len);
+        }
+      });
   };
 
   /**
@@ -2527,7 +2594,7 @@
       const client = readVarUint(decoder.restDecoder);
       const numberOfDeletes = readVarUint(decoder.restDecoder);
       if (numberOfDeletes > 0) {
-        const dsField = setIfUndefined(ds.clients, client, () => []);
+        const dsField = setIfUndefined(ds.clients, client, () => /** @type {Array<DeleteItem>} */ ([]));
         for (let i = 0; i < numberOfDeletes; i++) {
           dsField.push(new DeleteItem(decoder.readDsClock(), decoder.readDsLen()));
         }
@@ -2628,7 +2695,7 @@
    */
   class Doc extends Observable {
     /**
-     * @param {DocOpts} [opts] configuration
+     * @param {DocOpts} opts configuration
      */
     constructor ({ guid = uuidv4(), collectionid = null, gc = true, gcFilter = () => true, meta = null, autoLoad = false, shouldLoad = true } = {}) {
       super();
@@ -2662,13 +2729,57 @@
       this.shouldLoad = shouldLoad;
       this.autoLoad = autoLoad;
       this.meta = meta;
+      /**
+       * This is set to true when the persistence provider loaded the document from the database or when the `sync` event fires.
+       * Note that not all providers implement this feature. Provider authors are encouraged to fire the `load` event when the doc content is loaded from the database.
+       *
+       * @type {boolean}
+       */
       this.isLoaded = false;
+      /**
+       * This is set to true when the connection provider has successfully synced with a backend.
+       * Note that when using peer-to-peer providers this event may not provide very useful.
+       * Also note that not all providers implement this feature. Provider authors are encouraged to fire
+       * the `sync` event when the doc has been synced (with `true` as a parameter) or if connection is
+       * lost (with false as a parameter).
+       */
+      this.isSynced = false;
+      /**
+       * Promise that resolves once the document has been loaded from a presistence provider.
+       */
       this.whenLoaded = create$3(resolve => {
         this.on('load', () => {
           this.isLoaded = true;
           resolve(this);
         });
       });
+      const provideSyncedPromise = () => create$3(resolve => {
+        /**
+         * @param {boolean} isSynced
+         */
+        const eventHandler = (isSynced) => {
+          if (isSynced === undefined || isSynced === true) {
+            this.off('sync', eventHandler);
+            resolve();
+          }
+        };
+        this.on('sync', eventHandler);
+      });
+      this.on('sync', isSynced => {
+        if (isSynced === false && this.isSynced) {
+          this.whenSynced = provideSyncedPromise();
+        }
+        this.isSynced = isSynced === undefined || isSynced === true;
+        if (!this.isLoaded) {
+          this.emit('load', []);
+        }
+      });
+      /**
+       * Promise that resolves once the document has been synced with a backend.
+       * This promise is recreated when the connection is lost.
+       * Note the documentation about the `isSynced` property.
+       */
+      this.whenSynced = provideSyncedPromise();
     }
 
     /**
@@ -2693,7 +2804,7 @@
     }
 
     getSubdocGuids () {
-      return new Set(Array.from(this.subdocs).map(doc => doc.guid))
+      return new Set(from(this.subdocs).map(doc => doc.guid))
     }
 
     /**
@@ -2702,13 +2813,15 @@
      * that happened inside of the transaction are sent as one message to the
      * other peers.
      *
-     * @param {function(Transaction):void} f The function that should be executed as a transaction
+     * @template T
+     * @param {function(Transaction):T} f The function that should be executed as a transaction
      * @param {any} [origin] Origin of who started the transaction. Will be stored on transaction.origin
+     * @return T
      *
      * @public
      */
     transact (f, origin = null) {
-      transact(this, f, origin);
+      return transact(this, f, origin)
     }
 
     /**
@@ -3510,7 +3623,7 @@
         sm.set(client, clock);
       }
     });
-    getStateVector(store).forEach((clock, client) => {
+    getStateVector(store).forEach((_clock, client) => {
       if (!_sm.has(client)) {
         sm.set(client, 0);
       }
@@ -3519,9 +3632,8 @@
     writeVarUint(encoder.restEncoder, sm.size);
     // Write items with higher client ids first
     // This heavily improves the conflict algorithm.
-    Array.from(sm.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
-      // @ts-ignore
-      writeStructs(encoder, store.clients.get(client), client, clock);
+    from(sm.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
+      writeStructs(encoder, /** @type {Array<GC|Item>} */ (store.clients.get(client)), client, clock);
     });
   };
 
@@ -3654,7 +3766,7 @@
      */
     const stack = [];
     // sort them so that we take the higher id first, in case of conflicts the lower id will probably not conflict with the id from the higher user.
-    let clientsStructRefsIds = Array.from(clientsStructRefs.keys()).sort((a, b) => a - b);
+    let clientsStructRefsIds = from(clientsStructRefs.keys()).sort((a, b) => a - b);
     if (clientsStructRefsIds.length === 0) {
       return null
     }
@@ -4011,7 +4123,7 @@
    */
   const writeStateVector = (encoder, sv) => {
     writeVarUint(encoder.restEncoder, sv.size);
-    Array.from(sv.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
+    from(sv.entries()).sort((a, b) => b[0] - a[0]).forEach(([client, clock]) => {
       writeVarUint(encoder.restEncoder, client); // @todo use a special client decoder that is based on mapping
       writeVarUint(encoder.restEncoder, clock);
     });
@@ -4211,7 +4323,7 @@
           getItemCleanStart(transaction, createID(client, clock));
         }
       });
-      iterateDeletedStructs(transaction, snapshot.ds, item => {});
+      iterateDeletedStructs(transaction, snapshot.ds, _item => {});
       meta.add(snapshot);
     }
   };
@@ -4545,6 +4657,10 @@
        * @type {Set<Doc>}
        */
       this.subdocsLoaded = new Set();
+      /**
+       * @type {boolean}
+       */
+      this._needFormattingCleanup = false;
     }
   }
 
@@ -4581,18 +4697,29 @@
   /**
    * @param {Array<AbstractStruct>} structs
    * @param {number} pos
+   * @return {number} # of merged structs
    */
-  const tryToMergeWithLeft = (structs, pos) => {
-    const left = structs[pos - 1];
-    const right = structs[pos];
-    if (left.deleted === right.deleted && left.constructor === right.constructor) {
-      if (left.mergeWith(right)) {
-        structs.splice(pos, 1);
-        if (right instanceof Item && right.parentSub !== null && /** @type {AbstractType<any>} */ (right.parent)._map.get(right.parentSub) === right) {
-          /** @type {AbstractType<any>} */ (right.parent)._map.set(right.parentSub, /** @type {Item} */ (left));
+  const tryToMergeWithLefts = (structs, pos) => {
+    let right = structs[pos];
+    let left = structs[pos - 1];
+    let i = pos;
+    for (; i > 0; right = left, left = structs[--i - 1]) {
+      if (left.deleted === right.deleted && left.constructor === right.constructor) {
+        if (left.mergeWith(right)) {
+          if (right instanceof Item && right.parentSub !== null && /** @type {AbstractType<any>} */ (right.parent)._map.get(right.parentSub) === right) {
+            /** @type {AbstractType<any>} */ (right.parent)._map.set(right.parentSub, /** @type {Item} */ (left));
+          }
+          continue
         }
       }
+      break
     }
+    const merged = pos - i;
+    if (merged) {
+      // remove all merged structs from the array
+      structs.splice(pos + 1 - merged, merged);
+    }
+    return merged
   };
 
   /**
@@ -4639,9 +4766,9 @@
         for (
           let si = mostRightIndexToCheck, struct = structs[si];
           si > 0 && struct.id.clock >= deleteItem.clock;
-          struct = structs[--si]
+          struct = structs[si]
         ) {
-          tryToMergeWithLeft(structs, si);
+          si -= 1 + tryToMergeWithLefts(structs, si);
         }
       }
     });
@@ -4680,31 +4807,34 @@
         );
         fs.push(() => {
           // deep observe events
-          transaction.changedParentTypes.forEach((events, type) =>
-            fs.push(() => {
-              // We need to think about the possibility that the user transforms the
-              // Y.Doc in the event.
-              if (type._item === null || !type._item.deleted) {
-                events = events
-                  .filter(event =>
-                    event.target._item === null || !event.target._item.deleted
-                  );
-                events
-                  .forEach(event => {
-                    event.currentTarget = type;
-                  });
-                // sort events by path length so that top-level events are fired first.
-                events
-                  .sort((event1, event2) => event1.path.length - event2.path.length);
-                // We don't need to check for events.length
-                // because we know it has at least one element
-                callEventHandlerListeners(type._dEH, events, transaction);
-              }
-            })
-          );
-          fs.push(() => doc.emit('afterTransaction', [transaction, doc]));
+          transaction.changedParentTypes.forEach((events, type) => {
+            // We need to think about the possibility that the user transforms the
+            // Y.Doc in the event.
+            if (type._dEH.l.length > 0 && (type._item === null || !type._item.deleted)) {
+              events = events
+                .filter(event =>
+                  event.target._item === null || !event.target._item.deleted
+                );
+              events
+                .forEach(event => {
+                  event.currentTarget = type;
+                  // path is relative to the current target
+                  event._path = null;
+                });
+              // sort events by path length so that top-level events are fired first.
+              events
+                .sort((event1, event2) => event1.path.length - event2.path.length);
+              // We don't need to check for events.length
+              // because we know it has at least one element
+              callEventHandlerListeners(type._dEH, events, transaction);
+            }
+          });
         });
+        fs.push(() => doc.emit('afterTransaction', [transaction, doc]));
         callAll(fs, []);
+        if (transaction._needFormattingCleanup) {
+          cleanupYTextAfterTransaction(transaction);
+        }
       } finally {
         // Replace deleted items with ItemDeleted / GC.
         // This is where content is actually remove from the Yjs Doc.
@@ -4720,23 +4850,25 @@
             const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
             // we iterate from right to left so we can safely remove entries
             const firstChangePos = max(findIndexSS(structs, beforeClock), 1);
-            for (let i = structs.length - 1; i >= firstChangePos; i--) {
-              tryToMergeWithLeft(structs, i);
+            for (let i = structs.length - 1; i >= firstChangePos;) {
+              i -= 1 + tryToMergeWithLefts(structs, i);
             }
           }
         });
         // try to merge mergeStructs
         // @todo: it makes more sense to transform mergeStructs to a DS, sort it, and merge from right to left
         //        but at the moment DS does not handle duplicates
-        for (let i = 0; i < mergeStructs.length; i++) {
+        for (let i = mergeStructs.length - 1; i >= 0; i--) {
           const { client, clock } = mergeStructs[i].id;
           const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
           const replacedStructPos = findIndexSS(structs, clock);
           if (replacedStructPos + 1 < structs.length) {
-            tryToMergeWithLeft(structs, replacedStructPos + 1);
+            if (tryToMergeWithLefts(structs, replacedStructPos + 1) > 1) {
+              continue // no need to perform next check, both are already merged
+            }
           }
           if (replacedStructPos > 0) {
-            tryToMergeWithLeft(structs, replacedStructPos);
+            tryToMergeWithLefts(structs, replacedStructPos);
           }
         }
         if (!transaction.local && transaction.afterState.get(doc.clientID) !== transaction.beforeState.get(doc.clientID)) {
@@ -4786,15 +4918,21 @@
   /**
    * Implements the functionality of `y.transact(()=>{..})`
    *
+   * @template T
    * @param {Doc} doc
-   * @param {function(Transaction):void} f
+   * @param {function(Transaction):T} f
    * @param {any} [origin=true]
+   * @return {T}
    *
    * @function
    */
   const transact = (doc, f, origin = null, local = true) => {
     const transactionCleanups = doc._transactionCleanups;
     let initialCall = false;
+    /**
+     * @type {any}
+     */
+    let result = null;
     if (doc._transaction === null) {
       initialCall = true;
       doc._transaction = new Transaction(doc, origin, local);
@@ -4805,7 +4943,7 @@
       doc.emit('beforeTransaction', [doc._transaction, doc]);
     }
     try {
-      f(doc._transaction);
+      result = f(doc._transaction);
     } finally {
       if (initialCall) {
         const finishCleanup = doc._transaction === transactionCleanups[0];
@@ -4823,6 +4961,7 @@
         }
       }
     }
+    return result
   };
 
   /**
@@ -5202,17 +5341,17 @@
 
   /**
    * @param {Uint8Array} update
+   * @param {function(Item|GC|Skip):Item|GC|Skip} blockTransformer
    * @param {typeof UpdateDecoderV2 | typeof UpdateDecoderV1} YDecoder
    * @param {typeof UpdateEncoderV2 | typeof UpdateEncoderV1 } YEncoder
    */
-  const convertUpdateFormat = (update, YDecoder, YEncoder) => {
+  const convertUpdateFormat = (update, blockTransformer, YDecoder, YEncoder) => {
     const updateDecoder = new YDecoder(createDecoder(update));
     const lazyDecoder = new LazyStructReader(updateDecoder, false);
     const updateEncoder = new YEncoder();
     const lazyWriter = new LazyStructWriter(updateEncoder);
-
     for (let curr = lazyDecoder.curr; curr !== null; curr = lazyDecoder.next()) {
-      writeStructToLazyStructWriter(lazyWriter, curr, 0);
+      writeStructToLazyStructWriter(lazyWriter, blockTransformer(curr), 0);
     }
     finishLazyStructWriting(lazyWriter);
     const ds = readDeleteSet(updateDecoder);
@@ -5223,7 +5362,9 @@
   /**
    * @param {Uint8Array} update
    */
-  const convertUpdateFormatV2ToV1 = update => convertUpdateFormat(update, UpdateDecoderV2, UpdateEncoderV1);
+  const convertUpdateFormatV2ToV1 = update => convertUpdateFormat(update, id, UpdateDecoderV2, UpdateEncoderV1);
+
+  const errorComputeChanges = 'You must not compute changes after the event-handler fired.';
 
   /**
    * @template {AbstractType<any>} T
@@ -5262,6 +5403,10 @@
        * @type {null | Array<{ insert?: string | Array<any> | object | AbstractType<any>, retain?: number, delete?: number, attributes?: Object<string, any> }>}
        */
       this._delta = null;
+      /**
+       * @type {Array<string|number>|null}
+       */
+      this._path = null;
     }
 
     /**
@@ -5278,8 +5423,7 @@
      *   type === event.target // => true
      */
     get path () {
-      // @ts-ignore _item is defined because target is integrated
-      return getPathTo(this.currentTarget, this.target)
+      return this._path || (this._path = getPathTo(this.currentTarget, this.target))
     }
 
     /**
@@ -5299,6 +5443,9 @@
      */
     get keys () {
       if (this._keys === null) {
+        if (this.transaction.doc._transactionCleanups.length === 0) {
+          throw create$2(errorComputeChanges)
+        }
         const keys = new Map();
         const target = this.target;
         const changed = /** @type Set<string|null> */ (this.transaction.changed.get(target));
@@ -5348,6 +5495,11 @@
     }
 
     /**
+     * This is a computed property. Note that this can only be safely computed during the
+     * event call. Computing this property after other changes happened might result in
+     * unexpected behavior (incorrect computation of deltas). A safe way to collect changes
+     * is to store the `changes` or the `delta` object. Avoid storing the `transaction` object.
+     *
      * @type {Array<{insert?: string | Array<any> | object | AbstractType<any>, retain?: number, delete?: number, attributes?: Object<string, any>}>}
      */
     get delta () {
@@ -5367,11 +5519,19 @@
     }
 
     /**
+     * This is a computed property. Note that this can only be safely computed during the
+     * event call. Computing this property after other changes happened might result in
+     * unexpected behavior (incorrect computation of deltas). A safe way to collect changes
+     * is to store the `changes` or the `delta` object. Avoid storing the `transaction` object.
+     *
      * @type {{added:Set<Item>,deleted:Set<Item>,keys:Map<string,{action:'add'|'update'|'delete',oldValue:any}>,delta:Array<{insert?:Array<any>|string, delete?:number, retain?:number}>}}
      */
     get changes () {
       let changes = this._changes;
       if (changes === null) {
+        if (this.transaction.doc._transactionCleanups.length === 0) {
+          throw create$2(errorComputeChanges)
+        }
         const target = this.target;
         const added = create$1();
         const deleted = create$1();
@@ -5762,9 +5922,9 @@
     }
 
     /**
-     * @param {UpdateEncoderV1 | UpdateEncoderV2} encoder
+     * @param {UpdateEncoderV1 | UpdateEncoderV2} _encoder
      */
-    _write (encoder) { }
+    _write (_encoder) { }
 
     /**
      * The first non-deleted item
@@ -5782,9 +5942,9 @@
      * Must be implemented by each type.
      *
      * @param {Transaction} transaction
-     * @param {Set<null|string>} parentSubs Keys changed on this type. `null` if list was modified.
+     * @param {Set<null|string>} _parentSubs Keys changed on this type. `null` if list was modified.
      */
-    _callObserver (transaction, parentSubs) {
+    _callObserver (transaction, _parentSubs) {
       if (!transaction.local && this._searchMarker) {
         this._searchMarker.length = 0;
       }
@@ -6073,7 +6233,7 @@
     packJsonContent();
   };
 
-  const lengthExceeded = create$2('Length exceeded!');
+  const lengthExceeded = () => create$2('Length exceeded!');
 
   /**
    * @param {Transaction} transaction
@@ -6086,7 +6246,7 @@
    */
   const typeListInsertGenerics = (transaction, parent, index, content) => {
     if (index > parent._length) {
-      throw lengthExceeded
+      throw lengthExceeded()
     }
     if (index === 0) {
       if (parent._searchMarker) {
@@ -6188,7 +6348,7 @@
       n = n.right;
     }
     if (length > 0) {
-      throw lengthExceeded
+      throw lengthExceeded()
     }
     if (parent._searchMarker) {
       updateMarkerChanges(parent._searchMarker, startIndex, -startLength + length /* in case we remove the above exception */);
@@ -6349,11 +6509,14 @@
 
     /**
      * Construct a new YArray containing the specified items.
-     * @template T
+     * @template {Object<string,any>|Array<any>|number|null|string|Uint8Array} T
      * @param {Array<T>} items
      * @return {YArray<T>}
      */
     static from (items) {
+      /**
+       * @type {YArray<T>}
+       */
       const a = new YArray();
       a.push(items);
       return a
@@ -6375,6 +6538,9 @@
       this._prelimContent = null;
     }
 
+    /**
+     * @return {YArray<T>}
+     */
     _copy () {
       return new YArray()
     }
@@ -6383,9 +6549,12 @@
      * @return {YArray<T>}
      */
     clone () {
+      /**
+       * @type {YArray<T>}
+       */
       const arr = new YArray();
       arr.insert(0, this.toArray().map(el =>
-        el instanceof AbstractType ? el.clone() : el
+        el instanceof AbstractType ? /** @type {typeof el} */ (el.clone()) : el
       ));
       return arr
     }
@@ -6424,7 +6593,7 @@
     insert (index, content) {
       if (this.doc !== null) {
         transact(this.doc, transaction => {
-          typeListInsertGenerics(transaction, this, index, content);
+          typeListInsertGenerics(transaction, this, index, /** @type {any} */ (content));
         });
       } else {
         /** @type {Array<any>} */ (this._prelimContent).splice(index, 0, ...content);
@@ -6441,7 +6610,7 @@
     push (content) {
       if (this.doc !== null) {
         transact(this.doc, transaction => {
-          typeListPushGenerics(transaction, this, content);
+          typeListPushGenerics(transaction, this, /** @type {any} */ (content));
         });
       } else {
         /** @type {Array<any>} */ (this._prelimContent).push(...content);
@@ -6526,7 +6695,7 @@
     }
 
     /**
-     * Executes a provided function on once on overy element of this YArray.
+     * Executes a provided function once on overy element of this YArray.
      *
      * @param {function(T,number,YArray<T>):void} f A function to execute on every element of this YArray.
      */
@@ -6550,12 +6719,12 @@
   }
 
   /**
-   * @param {UpdateDecoderV1 | UpdateDecoderV2} decoder
+   * @param {UpdateDecoderV1 | UpdateDecoderV2} _decoder
    *
    * @private
    * @function
    */
-  const readYArray = decoder => new YArray();
+  const readYArray = _decoder => new YArray();
 
   /**
    * @template T
@@ -6619,6 +6788,9 @@
       this._prelimContent = null;
     }
 
+    /**
+     * @return {YMap<MapType>}
+     */
     _copy () {
       return new YMap()
     }
@@ -6627,9 +6799,12 @@
      * @return {YMap<MapType>}
      */
     clone () {
+      /**
+       * @type {YMap<MapType>}
+       */
       const map = new YMap();
       this.forEach((value, key) => {
-        map.set(key, value instanceof AbstractType ? value.clone() : value);
+        map.set(key, value instanceof AbstractType ? /** @type {typeof value} */ (value.clone()) : value);
       });
       return map
     }
@@ -6738,14 +6913,16 @@
 
     /**
      * Adds or updates an element with a specified key and value.
+     * @template {MapType} VAL
      *
      * @param {string} key The key of the element to add to this YMap
-     * @param {MapType} value The value of the element to add
+     * @param {VAL} value The value of the element to add
+     * @return {VAL}
      */
     set (key, value) {
       if (this.doc !== null) {
         transact(this.doc, transaction => {
-          typeMapSet(transaction, this, key, value);
+          typeMapSet(transaction, this, key, /** @type {any} */ (value));
         });
       } else {
         /** @type {Map<string, any>} */ (this._prelimContent).set(key, value);
@@ -6779,7 +6956,7 @@
     clear () {
       if (this.doc !== null) {
         transact(this.doc, transaction => {
-          this.forEach(function (value, key, map) {
+          this.forEach(function (_value, key, map) {
             typeMapDelete(transaction, map, key);
           });
         });
@@ -6797,12 +6974,12 @@
   }
 
   /**
-   * @param {UpdateDecoderV1 | UpdateDecoderV2} decoder
+   * @param {UpdateDecoderV1 | UpdateDecoderV2} _decoder
    *
    * @private
    * @function
    */
-  const readYMap = decoder => new YMap();
+  const readYMap = _decoder => new YMap();
 
   /**
    * @param {any} a
@@ -7019,7 +7196,7 @@
    * @function
    **/
   const insertText = (transaction, parent, currPos, text, attributes) => {
-    currPos.currentAttributes.forEach((val, key) => {
+    currPos.currentAttributes.forEach((_val, key) => {
       if (attributes[key] === undefined) {
         attributes[key] = null;
       }
@@ -7131,32 +7308,47 @@
    * @function
    */
   const cleanupFormattingGap = (transaction, start, curr, startAttributes, currAttributes) => {
-    let end = curr;
-    const endAttributes = copy(currAttributes);
+    /**
+     * @type {Item|null}
+     */
+    let end = start;
+    /**
+     * @type {Map<string,ContentFormat>}
+     */
+    const endFormats = create();
     while (end && (!end.countable || end.deleted)) {
       if (!end.deleted && end.content.constructor === ContentFormat) {
-        updateCurrentAttributes(endAttributes, /** @type {ContentFormat} */ (end.content));
+        const cf = /** @type {ContentFormat} */ (end.content);
+        endFormats.set(cf.key, cf);
       }
       end = end.right;
     }
     let cleanups = 0;
-    let reachedEndOfCurr = false;
+    let reachedCurr = false;
     while (start !== end) {
       if (curr === start) {
-        reachedEndOfCurr = true;
+        reachedCurr = true;
       }
       if (!start.deleted) {
         const content = start.content;
         switch (content.constructor) {
           case ContentFormat: {
             const { key, value } = /** @type {ContentFormat} */ (content);
-            if ((endAttributes.get(key) || null) !== value || (startAttributes.get(key) || null) === value) {
+            const startAttrValue = startAttributes.get(key) || null;
+            if (endFormats.get(key) !== content || startAttrValue === value) {
               // Either this format is overwritten or it is not necessary because the attribute already existed.
               start.delete(transaction);
               cleanups++;
-              if (!reachedEndOfCurr && (currAttributes.get(key) || null) === value && (startAttributes.get(key) || null) !== value) {
-                currAttributes.delete(key);
+              if (!reachedCurr && (currAttributes.get(key) || null) === value && startAttrValue !== value) {
+                if (startAttrValue === null) {
+                  currAttributes.delete(key);
+                } else {
+                  currAttributes.set(key, startAttrValue);
+                }
               }
+            }
+            if (!reachedCurr && !start.deleted) {
+              updateCurrentAttributes(currAttributes, /** @type {ContentFormat} */ (content));
             }
             break
           }
@@ -7227,6 +7419,56 @@
       }
     });
     return res
+  };
+
+  /**
+   * This will be called by the transction once the event handlers are called to potentially cleanup
+   * formatting attributes.
+   *
+   * @param {Transaction} transaction
+   */
+  const cleanupYTextAfterTransaction = transaction => {
+    /**
+     * @type {Set<YText>}
+     */
+    const needFullCleanup = new Set();
+    // check if another formatting item was inserted
+    const doc = transaction.doc;
+    for (const [client, afterClock] of transaction.afterState.entries()) {
+      const clock = transaction.beforeState.get(client) || 0;
+      if (afterClock === clock) {
+        continue
+      }
+      iterateStructs(transaction, /** @type {Array<Item|GC>} */ (doc.store.clients.get(client)), clock, afterClock, item => {
+        if (
+          !item.deleted && /** @type {Item} */ (item).content.constructor === ContentFormat && item.constructor !== GC
+        ) {
+          needFullCleanup.add(/** @type {any} */ (item).parent);
+        }
+      });
+    }
+    // cleanup in a new transaction
+    transact(doc, (t) => {
+      iterateDeletedStructs(transaction, transaction.deleteSet, item => {
+        if (item instanceof GC || !(/** @type {YText} */ (item.parent)._hasFormatting) || needFullCleanup.has(/** @type {YText} */ (item.parent))) {
+          return
+        }
+        const parent = /** @type {YText} */ (item.parent);
+        if (item.content.constructor === ContentFormat) {
+          needFullCleanup.add(parent);
+        } else {
+          // If no formatting attribute was inserted or deleted, we can make due with contextless
+          // formatting cleanups.
+          // Contextless: it is not necessary to compute currentAttributes for the affected position.
+          cleanupContextlessFormattingGap(t, item);
+        }
+      });
+      // If a formatting item was inserted, we simply clean the whole type.
+      // We need to compute currentAttributes for the current position anyway.
+      for (const yText of needFullCleanup) {
+        cleanupYTextFormatting(yText);
+      }
+    });
   };
 
   /**
@@ -7384,36 +7626,39 @@
               /**
                * @type {any}
                */
-              let op;
+              let op = null;
               switch (action) {
                 case 'delete':
-                  op = { delete: deleteLen };
+                  if (deleteLen > 0) {
+                    op = { delete: deleteLen };
+                  }
                   deleteLen = 0;
                   break
                 case 'insert':
-                  op = { insert };
-                  if (currentAttributes.size > 0) {
-                    op.attributes = {};
-                    currentAttributes.forEach((value, key) => {
-                      if (value !== null) {
-                        op.attributes[key] = value;
-                      }
-                    });
+                  if (typeof insert === 'object' || insert.length > 0) {
+                    op = { insert };
+                    if (currentAttributes.size > 0) {
+                      op.attributes = {};
+                      currentAttributes.forEach((value, key) => {
+                        if (value !== null) {
+                          op.attributes[key] = value;
+                        }
+                      });
+                    }
                   }
                   insert = '';
                   break
                 case 'retain':
-                  op = { retain };
-                  if (Object.keys(attributes).length > 0) {
-                    op.attributes = {};
-                    for (const key in attributes) {
-                      op.attributes[key] = attributes[key];
+                  if (retain > 0) {
+                    op = { retain };
+                    if (!isEmpty(attributes)) {
+                      op.attributes = assign({}, attributes);
                     }
                   }
                   retain = 0;
                   break
               }
-              delta.push(op);
+              if (op) delta.push(op);
               action = null;
             }
           };
@@ -7559,9 +7804,14 @@
        */
       this._pending = string !== undefined ? [() => this.insert(0, string)] : [];
       /**
-       * @type {Array<ArraySearchMarker>}
+       * @type {Array<ArraySearchMarker>|null}
        */
       this._searchMarker = [];
+      /**
+       * Whether this YText contains formatting attributes.
+       * This flag is updated when a formatting item is integrated (see ContentFormat.integrate)
+       */
+      this._hasFormatting = false;
     }
 
     /**
@@ -7609,55 +7859,10 @@
     _callObserver (transaction, parentSubs) {
       super._callObserver(transaction, parentSubs);
       const event = new YTextEvent(this, transaction, parentSubs);
-      const doc = transaction.doc;
       callTypeObservers(this, transaction, event);
       // If a remote change happened, we try to cleanup potential formatting duplicates.
-      if (!transaction.local) {
-        // check if another formatting item was inserted
-        let foundFormattingItem = false;
-        for (const [client, afterClock] of transaction.afterState.entries()) {
-          const clock = transaction.beforeState.get(client) || 0;
-          if (afterClock === clock) {
-            continue
-          }
-          iterateStructs(transaction, /** @type {Array<Item|GC>} */ (doc.store.clients.get(client)), clock, afterClock, item => {
-            if (!item.deleted && /** @type {Item} */ (item).content.constructor === ContentFormat) {
-              foundFormattingItem = true;
-            }
-          });
-          if (foundFormattingItem) {
-            break
-          }
-        }
-        if (!foundFormattingItem) {
-          iterateDeletedStructs(transaction, transaction.deleteSet, item => {
-            if (item instanceof GC || foundFormattingItem) {
-              return
-            }
-            if (item.parent === this && item.content.constructor === ContentFormat) {
-              foundFormattingItem = true;
-            }
-          });
-        }
-        transact(doc, (t) => {
-          if (foundFormattingItem) {
-            // If a formatting item was inserted, we simply clean the whole type.
-            // We need to compute currentAttributes for the current position anyway.
-            cleanupYTextFormatting(this);
-          } else {
-            // If no formatting attribute was inserted, we can make due with contextless
-            // formatting cleanups.
-            // Contextless: it is not necessary to compute currentAttributes for the affected position.
-            iterateDeletedStructs(t, t.deleteSet, item => {
-              if (item instanceof GC) {
-                return
-              }
-              if (item.parent === this) {
-                cleanupContextlessFormattingGap(t, item);
-              }
-            });
-          }
-        });
+      if (!transaction.local && this._hasFormatting) {
+        transaction._needFormattingCleanup = true;
       }
     }
 
@@ -7695,7 +7900,7 @@
      * Apply a {@link Delta} on this shared YText type.
      *
      * @param {any} delta The changes to apply on this element.
-     * @param {object}  [opts]
+     * @param {object}  opts
      * @param {boolean} [opts.sanitize] Sanitize input delta. Removes ending newlines if set to true.
      *
      *
@@ -7771,15 +7976,7 @@
           str = '';
         }
       }
-      // snapshots are merged again after the transaction, so we need to keep the
-      // transalive until we are done
-      transact(doc, transaction => {
-        if (snapshot) {
-          splitSnapshotAffectedStructs(transaction, snapshot);
-        }
-        if (prevSnapshot) {
-          splitSnapshotAffectedStructs(transaction, prevSnapshot);
-        }
+      const computeDelta = () => {
         while (n !== null) {
           if (isVisible(n, snapshot) || (prevSnapshot !== undefined && isVisible(n, prevSnapshot))) {
             switch (n.content.constructor) {
@@ -7832,7 +8029,22 @@
           n = n.right;
         }
         packStr();
-      }, 'cleanup');
+      };
+      if (snapshot || prevSnapshot) {
+        // snapshots are merged again after the transaction, so we need to keep the
+        // transaction alive until we are done
+        transact(doc, transaction => {
+          if (snapshot) {
+            splitSnapshotAffectedStructs(transaction, snapshot);
+          }
+          if (prevSnapshot) {
+            splitSnapshotAffectedStructs(transaction, prevSnapshot);
+          }
+          computeDelta();
+        }, 'cleanup');
+      } else {
+        computeDelta();
+      }
       return ops
     }
 
@@ -7997,12 +8209,11 @@
      *
      * @note Xml-Text nodes don't have attributes. You can use this feature to assign properties to complete text-blocks.
      *
-     * @param {Snapshot} [snapshot]
      * @return {Object<string, any>} A JSON Object that describes the attributes.
      *
      * @public
      */
-    getAttributes (snapshot) {
+    getAttributes () {
       return typeMapGetAll(this)
     }
 
@@ -8015,13 +8226,13 @@
   }
 
   /**
-   * @param {UpdateDecoderV1 | UpdateDecoderV2} decoder
+   * @param {UpdateDecoderV1 | UpdateDecoderV2} _decoder
    * @return {YText}
    *
    * @private
    * @function
    */
-  const readYText = decoder => new YText();
+  const readYText = _decoder => new YText();
 
   /**
    * @module YXml
@@ -8242,7 +8453,7 @@
     querySelectorAll (query) {
       query = query.toUpperCase();
       // @ts-ignore
-      return Array.from(new YXmlTreeWalker(this, element => element.nodeName && element.nodeName.toUpperCase() === query))
+      return from(new YXmlTreeWalker(this, element => element.nodeName && element.nodeName.toUpperCase() === query))
     }
 
     /**
@@ -8412,7 +8623,7 @@
     /**
      * Executes a provided function on once on overy child element.
      *
-     * @param {function(YXmlElement|YXmlText,number, typeof this):void} f A function to execute on every element of this YArray.
+     * @param {function(YXmlElement|YXmlText,number, typeof self):void} f A function to execute on every element of this YArray.
      */
     forEach (f) {
       typeListForEach(this, f);
@@ -8432,13 +8643,17 @@
   }
 
   /**
-   * @param {UpdateDecoderV1 | UpdateDecoderV2} decoder
+   * @param {UpdateDecoderV1 | UpdateDecoderV2} _decoder
    * @return {YXmlFragment}
    *
    * @private
    * @function
    */
-  const readYXmlFragment = decoder => new YXmlFragment();
+  const readYXmlFragment = _decoder => new YXmlFragment();
+
+  /**
+   * @typedef {Object|number|null|Array<any>|string|Uint8Array|AbstractType<any>} ValueTypes
+   */
 
   /**
    * An YXmlElement imitates the behavior of a
@@ -8446,6 +8661,8 @@
    *
    * * An YXmlElement has attributes (key value pairs)
    * * An YXmlElement has childElements that must inherit from YXmlElement
+   *
+   * @template {{ [key: string]: ValueTypes }} [KV={ [key: string]: string }]
    */
   class YXmlElement extends YXmlFragment {
     constructor (nodeName = 'UNDEFINED') {
@@ -8501,14 +8718,19 @@
     }
 
     /**
-     * @return {YXmlElement}
+     * @return {YXmlElement<KV>}
      */
     clone () {
+      /**
+       * @type {YXmlElement<KV>}
+       */
       const el = new YXmlElement(this.nodeName);
       const attrs = this.getAttributes();
-      for (const key in attrs) {
-        el.setAttribute(key, attrs[key]);
-      }
+      forEach(attrs, (value, key) => {
+        if (typeof value === 'string') {
+          el.setAttribute(key, value);
+        }
+      });
       // @ts-ignore
       el.insert(0, this.toArray().map(item => item instanceof AbstractType ? item.clone() : item));
       return el
@@ -8544,7 +8766,7 @@
     /**
      * Removes an attribute from this YXmlElement.
      *
-     * @param {String} attributeName The attribute name that is to be removed.
+     * @param {string} attributeName The attribute name that is to be removed.
      *
      * @public
      */
@@ -8561,8 +8783,10 @@
     /**
      * Sets or updates an attribute.
      *
-     * @param {String} attributeName The attribute name that is to be set.
-     * @param {String} attributeValue The attribute value that is to be set.
+     * @template {keyof KV & string} KEY
+     *
+     * @param {KEY} attributeName The attribute name that is to be set.
+     * @param {KV[KEY]} attributeValue The attribute value that is to be set.
      *
      * @public
      */
@@ -8579,9 +8803,11 @@
     /**
      * Returns an attribute value that belongs to the attribute name.
      *
-     * @param {String} attributeName The attribute name that identifies the
+     * @template {keyof KV & string} KEY
+     *
+     * @param {KEY} attributeName The attribute name that identifies the
      *                               queried value.
-     * @return {String} The queried attribute value.
+     * @return {KV[KEY]|undefined} The queried attribute value.
      *
      * @public
      */
@@ -8592,7 +8818,7 @@
     /**
      * Returns whether an attribute exists
      *
-     * @param {String} attributeName The attribute name to check for existence.
+     * @param {string} attributeName The attribute name to check for existence.
      * @return {boolean} whether the attribute exists.
      *
      * @public
@@ -8604,12 +8830,12 @@
     /**
      * Returns all attribute name/value pairs in a JSON Object.
      *
-     * @return {Object<string, any>} A JSON Object that describes the attributes.
+     * @return {{ [Key in Extract<keyof KV,string>]?: KV[Key]}} A JSON Object that describes the attributes.
      *
      * @public
      */
     getAttributes () {
-      return typeMapGetAll(this)
+      return /** @type {any} */ (typeMapGetAll(this))
     }
 
     /**
@@ -8631,7 +8857,10 @@
       const dom = _document.createElement(this.nodeName);
       const attrs = this.getAttributes();
       for (const key in attrs) {
-        dom.setAttribute(key, attrs[key]);
+        const value = attrs[key];
+        if (typeof value === 'string') {
+          dom.setAttribute(key, value);
+        }
       }
       typeListForEach(this, yxml => {
         dom.appendChild(yxml.toDOM(_document, hooks, binding));
@@ -9456,28 +9685,30 @@
     }
 
     /**
-     * @param {number} offset
+     * @param {number} _offset
      * @return {ContentFormat}
      */
-    splice (offset) {
+    splice (_offset) {
       throw methodUnimplemented()
     }
 
     /**
-     * @param {ContentFormat} right
+     * @param {ContentFormat} _right
      * @return {boolean}
      */
-    mergeWith (right) {
+    mergeWith (_right) {
       return false
     }
 
     /**
-     * @param {Transaction} transaction
+     * @param {Transaction} _transaction
      * @param {Item} item
      */
-    integrate (transaction, item) {
+    integrate (_transaction, item) {
       // @todo searchmarker are currently unsupported for rich text documents
-      /** @type {AbstractType<any>} */ (item.parent)._searchMarker = null;
+      const p = /** @type {YText} */ (item.parent);
+      p._searchMarker = null;
+      p._hasFormatting = true;
     }
 
     /**
@@ -9936,7 +10167,7 @@
       while (item !== null) {
         if (!item.deleted) {
           item.delete(transaction);
-        } else {
+        } else if (item.id.clock < (transaction.beforeState.get(item.id.client) || 0)) {
           // This will be gc'd later and we want to merge it if possible
           // We try to merge all deleted items after each transaction,
           // but we have no knowledge about that this needs to be merged
@@ -9948,7 +10179,7 @@
       this.type._map.forEach(item => {
         if (!item.deleted) {
           item.delete(transaction);
-        } else {
+        } else if (item.id.clock < (transaction.beforeState.get(item.id.client) || 0)) {
           // same as above
           transaction._mergeStructs.push(item);
         }
@@ -10195,9 +10426,8 @@
       }
       if ((this.left && this.left.constructor === GC) || (this.right && this.right.constructor === GC)) {
         this.parent = null;
-      }
-      // only set parent if this shouldn't be garbage collected
-      if (!this.parent) {
+      } else if (!this.parent) {
+        // only set parent if this shouldn't be garbage collected
         if (this.left && this.left.constructor === Item) {
           this.parent = this.left.parent;
           this.parentSub = this.left.parentSub;
@@ -10688,12 +10918,13 @@
   };
 
   /**
+   * @deprecated
    * @extends Observable<string>
    */
   class WebsocketClient extends Observable {
     /**
      * @param {string} url
-     * @param {object} [opts]
+     * @param {object} opts
      * @param {'arraybuffer' | 'blob' | null} [opts.binaryType] Set `ws.binaryType`
      */
     constructor (url, { binaryType } = {}) {
@@ -10766,7 +10997,7 @@
    */
   const channels = new Map();
 
-  /* istanbul ignore next */
+  /* c8 ignore start */
   class LocalStoragePolyfill {
     /**
      * @param {string} room
@@ -10777,7 +11008,11 @@
        * @type {null|function({data:ArrayBuffer}):void}
        */
       this.onmessage = null;
-      onChange(e => e.key === room && this.onmessage !== null && this.onmessage({ data: fromBase64(e.newValue || '') }));
+      /**
+       * @param {any} e
+       */
+      this._onChange = e => e.key === room && this.onmessage !== null && this.onmessage({ data: fromBase64(e.newValue || '') });
+      onChange(this._onChange);
     }
 
     /**
@@ -10786,10 +11021,15 @@
     postMessage (buf) {
       varStorage.setItem(this.room, toBase64(createUint8ArrayFromArrayBuffer(buf)));
     }
-  }
 
-  /* istanbul ignore next */
+    close () {
+      offChange(this._onChange);
+    }
+  }
+  /* c8 ignore stop */
+
   // Use BroadcastChannel or Polyfill
+  /* c8 ignore next */
   const BC = typeof BroadcastChannel === 'undefined' ? LocalStoragePolyfill : BroadcastChannel;
 
   /**
@@ -10798,12 +11038,12 @@
    */
   const getChannel = room =>
     setIfUndefined(channels, room, () => {
-      const subs = new Set();
+      const subs = create$1();
       const bc = new BC(room);
-      /* istanbul ignore next */
       /**
        * @param {{data:ArrayBuffer}} e
        */
+      /* c8 ignore next */
       bc.onmessage = e => subs.forEach(sub => sub(e.data, 'broadcastchannel'));
       return {
         bc, subs
@@ -10832,7 +11072,6 @@
   const unsubscribe = (room, f) => {
     const channel = getChannel(room);
     const unsubscribed = channel.subs.delete(f);
-    /* istanbul ignore else */
     if (unsubscribed && channel.subs.size === 0) {
       channel.bc.close();
       channels.delete(room);
@@ -10934,8 +11173,8 @@
    * When the server receives SyncStep1, it should reply with SyncStep2 immediately followed by SyncStep1. The client replies
    * with SyncStep2 when it receives SyncStep1. Optionally the server may send a SyncDone after it received SyncStep2, so the
    * client knows that the sync is finished.  There are two reasons for this more elaborated sync model: 1. This protocol can
-   * easily be implemented on top of http and websockets. 2. The server shoul only reply to requests, and not initiate them.
-   * Therefore it is necesarry that the client initiates the sync.
+   * easily be implemented on top of http and websockets. 2. The server should only reply to requests, and not initiate them.
+   * Therefore it is necessary that the client initiates the sync.
    *
    * Construction of a message:
    * [messageType : varUint, message definition..]
@@ -11017,7 +11256,7 @@
 
   /**
    * @param {decoding.Decoder} decoder A message received from another client
-   * @param {encoding.Encoder} encoder The reply message. Will not be sent if empty.
+   * @param {encoding.Encoder} encoder The reply message. Does not need to be sent if empty.
    * @param {Y.Doc} doc
    * @param {any} transactionOrigin
    */
@@ -11408,7 +11647,7 @@
       readAny(createDecoder(new Uint8Array(decryptedValue)))
     );
 
-  const log = createModuleLogger('y-webrtc');
+  const log = createModuleLogger$1('y-webrtc');
 
   const messageSync = 0;
   const messageQueryAwareness = 3;
@@ -11562,6 +11801,7 @@
       log('establishing connection to ', BOLD, remotePeerId);
       this.room = room;
       this.remotePeerId = remotePeerId;
+      this.glareToken = undefined;
       this.closed = false;
       this.connected = false;
       this.synced = false;
@@ -11570,7 +11810,11 @@
        */
       this.peer = new simplepeer_min({ initiator, ...room.provider.peerOpts });
       this.peer.on('signal', signal => {
-        publishSignalingMessage(signalingConn, room, { to: remotePeerId, from: room.peerId, type: 'signal', signal });
+        if (this.glareToken === undefined) {
+          // add some randomness to the timestamp of the offer
+          this.glareToken = Date.now() + Math.random();
+        }
+        publishSignalingMessage(signalingConn, room, { to: remotePeerId, from: room.peerId, type: 'signal', token: this.glareToken, signal });
       });
       this.peer.on('connect', () => {
         log('connected to ', BOLD, remotePeerId);
@@ -11651,7 +11895,7 @@
    */
   const announceSignalingInfo = room => {
     signalingConns.forEach(conn => {
-      // only subcribe if connection is established, otherwise the conn automatically subscribes to all rooms
+      // only subscribe if connection is established, otherwise the conn automatically subscribes to all rooms
       if (conn.connected) {
         conn.send({ type: 'subscribe', topics: [room.name] });
         if (room.webrtcConns.size < room.provider.maxConns) {
@@ -11725,9 +11969,9 @@
        * Listens to Yjs updates and sends them to remote peers
        *
        * @param {Uint8Array} update
-       * @param {any} origin
+       * @param {any} _origin
        */
-      this._docUpdateHandler = (update, origin) => {
+      this._docUpdateHandler = (update, _origin) => {
         const encoder = createEncoder();
         writeVarUint(encoder, messageSync);
         writeUpdate(encoder, update);
@@ -11737,9 +11981,9 @@
        * Listens to Awareness updates and sends them to remote peers
        *
        * @param {any} changed
-       * @param {any} origin
+       * @param {any} _origin
        */
-      this._awarenessUpdateHandler = ({ added, updated, removed }, origin) => {
+      this._awarenessUpdateHandler = ({ added, updated, removed }, _origin) => {
         const changedClients = added.concat(updated).concat(removed);
         const encoderAwareness = createEncoder();
         writeVarUint(encoderAwareness, messageAwareness);
@@ -11903,6 +12147,24 @@
                   }
                   break
                 case 'signal':
+                  if (data.signal.type === 'offer') {
+                    const existingConn = webrtcConns.get(data.from);
+                    if (existingConn) {
+                      const remoteToken = data.token;
+                      const localToken = existingConn.glareToken;
+                      if (localToken && localToken > remoteToken) {
+                        log('offer rejected: ', data.from);
+                        return
+                      }
+                      // if we don't reject the offer, we will be accepting it and answering it
+                      existingConn.glareToken = undefined;
+                    }
+                  }
+                  if (data.signal.type === 'answer') {
+                    log('offer answered by: ', data.from);
+                    const existingConn = webrtcConns.get(data.from);
+                    existingConn.glareToken = undefined;
+                  }
                   if (data.to === peerId) {
                     setIfUndefined(webrtcConns, data.from, () => new WebrtcConn(this, false, data.from, room)).peer.signal(data.signal);
                     emitPeerChange();
@@ -11935,9 +12197,25 @@
    */
 
   /**
-   * @extends Observable<string>
+   * @param {WebrtcProvider} provider
    */
-  class WebrtcProvider extends Observable {
+  const emitStatus = provider => {
+    provider.emit('status', [{
+      connected: provider.connected
+    }]);
+  };
+
+  /**
+   * @typedef {Object} WebrtcProviderEvents
+   * @property {function({connected:boolean}):void} WebrtcProviderEvent.status
+   * @property {function({synced:boolean}):void} WebrtcProviderEvent.synced
+   * @property {function({added:Array<string>,removed:Array<string>,webrtcPeers:Array<string>,bcPeers:Array<string>}):void} WebrtcProviderEvent.peers
+   */
+
+  /**
+   * @extends ObservableV2<WebrtcProviderEvents>
+   */
+  class WebrtcProvider extends ObservableV2 {
     /**
      * @param {string} roomName
      * @param {Y.Doc} doc
@@ -11983,6 +12261,7 @@
         } else {
           this.room.disconnect();
         }
+        emitStatus(this);
       });
       this.connect();
       this.destroy = this.destroy.bind(this);
@@ -11990,6 +12269,15 @@
     }
 
     /**
+     * Indicates whether the provider is looking for other peers.
+     *
+     * Other peers can be found via signaling servers or via broadcastchannel (cross browser-tab
+     * communication). You never know when you are connected to all peers. You also don't know if
+     * there are other peers. connected doesn't mean that you are connected to any physical peers
+     * working on the same resource as you. It does not change unless you call provider.disconnect()
+     *
+     * `this.on('status', (event) => { console.log(event.connected) })`
+     *
      * @type {boolean}
      */
     get connected () {
@@ -12005,6 +12293,7 @@
       });
       if (this.room) {
         this.room.connect();
+        emitStatus(this);
       }
     }
 
@@ -12019,6 +12308,7 @@
       });
       if (this.room) {
         this.room.disconnect();
+        emitStatus(this);
       }
     }
 

@@ -2,6 +2,88 @@
   'use strict';
 
   /**
+   * Common Math expressions.
+   *
+   * @module math
+   */
+
+  const floor = Math.floor;
+  const ceil = Math.ceil;
+  const round = Math.round;
+  const log10 = Math.log10;
+
+  /**
+   * @function
+   * @param {number} a
+   * @param {number} b
+   * @return {number} The sum of a and b
+   */
+  const add = (a, b) => a + b;
+
+  /**
+   * @function
+   * @param {number} a
+   * @param {number} b
+   * @return {number} The smaller element of a and b
+   */
+  const min = (a, b) => a < b ? a : b;
+
+  /**
+   * @function
+   * @param {number} a
+   * @param {number} b
+   * @return {number} The bigger element of a and b
+   */
+  const max = (a, b) => a > b ? a : b;
+  /**
+   * Base 10 exponential function. Returns the value of 10 raised to the power of pow.
+   *
+   * @param {number} exp
+   * @return {number}
+   */
+  const exp10 = exp => Math.pow(10, exp);
+
+  /* eslint-env browser */
+  const BIT8 = 128;
+  const BITS7 = 127;
+  const BITS8 = 255;
+  /**
+   * @type {number}
+   */
+  const BITS32 = 0xFFFFFFFF;
+
+  /**
+   * Utility helpers for working with numbers.
+   *
+   * @module number
+   */
+
+  const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+
+  /**
+   * Utility module to work with sets.
+   *
+   * @module set
+   */
+
+  const create = () => new Set();
+
+  /**
+   * Utility module to work with Arrays.
+   *
+   * @module array
+   */
+
+  /**
+   * Return the last element of an array. The element must exist
+   *
+   * @template L
+   * @param {ArrayLike<L>} arr
+   * @return {L}
+   */
+  const last = arr => arr[arr.length - 1];
+
+  /**
    * Utility module to work with strings.
    *
    * @module string
@@ -46,7 +128,7 @@
     return buf
   };
 
-  /* istanbul ignore next */
+  /* c8 ignore next */
   const utf8TextEncoder = /** @type {TextEncoder} */ (typeof TextEncoder !== 'undefined' ? new TextEncoder() : null);
 
   /**
@@ -59,379 +141,227 @@
    * @param {string} str
    * @return {Uint8Array}
    */
-  /* istanbul ignore next */
+  /* c8 ignore next */
   const encodeUtf8 = utf8TextEncoder ? _encodeUtf8Native : _encodeUtf8Polyfill;
 
-  /* istanbul ignore next */
+  /* c8 ignore next */
   let utf8TextDecoder = typeof TextDecoder === 'undefined' ? null : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
-  /* istanbul ignore next */
+  /* c8 ignore start */
   if (utf8TextDecoder && utf8TextDecoder.decode(new Uint8Array()).length === 1) {
     // Safari doesn't handle BOM correctly.
     // This fixes a bug in Safari 13.0.5 where it produces a BOM the first time it is called.
     // utf8TextDecoder.decode(new Uint8Array()).length === 1 on the first call and
     // utf8TextDecoder.decode(new Uint8Array()).length === 1 on the second call
     // Another issue is that from then on no BOM chars are recognized anymore
-    /* istanbul ignore next */
+    /* c8 ignore next */
     utf8TextDecoder = null;
   }
 
   /**
-   * Utility module to work with key-value stores.
+   * Efficient schema-less binary encoding with support for variable length encoding.
    *
-   * @module map
+   * Use [lib0/encoding] with [lib0/decoding]. Every encoding function has a corresponding decoding function.
+   *
+   * Encodes numbers in little-endian order (least to most significant byte order)
+   * and is compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
+   * which is also used in Protocol Buffers.
+   *
+   * ```js
+   * // encoding step
+   * const encoder = encoding.createEncoder()
+   * encoding.writeVarUint(encoder, 256)
+   * encoding.writeVarString(encoder, 'Hello world!')
+   * const buf = encoding.toUint8Array(encoder)
+   * ```
+   *
+   * ```js
+   * // decoding step
+   * const decoder = decoding.createDecoder(buf)
+   * decoding.readVarUint(decoder) // => 256
+   * decoding.readVarString(decoder) // => 'Hello world!'
+   * decoding.hasContent(decoder) // => false - all data is read
+   * ```
+   *
+   * @module encoding
    */
 
   /**
-   * Creates a new Map instance.
-   *
-   * @function
-   * @return {Map<any, any>}
-   *
-   * @function
+   * A BinaryEncoder handles the encoding to an Uint8Array.
    */
-  const create = () => new Map();
-
-  /**
-   * Creates an Array and populates it with the content of all key-value pairs using the `f(value, key)` function.
-   *
-   * @function
-   * @template K
-   * @template V
-   * @template R
-   * @param {Map<K,V>} m
-   * @param {function(V,K):R} f
-   * @return {Array<R>}
-   */
-  const map = (m, f) => {
-    const res = [];
-    for (const [key, value] of m) {
-      res.push(f(value, key));
-    }
-    return res
-  };
-
-  /**
-   * Often used conditions.
-   *
-   * @module conditions
-   */
-
-  /**
-   * @template T
-   * @param {T|null|undefined} v
-   * @return {T|null}
-   */
-  /* istanbul ignore next */
-  const undefinedToNull = v => v === undefined ? null : v;
-
-  /* global localStorage, addEventListener */
-
-  /**
-   * Isomorphic variable storage.
-   *
-   * Uses LocalStorage in the browser and falls back to in-memory storage.
-   *
-   * @module storage
-   */
-
-  /* istanbul ignore next */
-  class VarStoragePolyfill {
+  class Encoder {
     constructor () {
-      this.map = new Map();
-    }
-
-    /**
-     * @param {string} key
-     * @param {any} newValue
-     */
-    setItem (key, newValue) {
-      this.map.set(key, newValue);
-    }
-
-    /**
-     * @param {string} key
-     */
-    getItem (key) {
-      return this.map.get(key)
+      this.cpos = 0;
+      this.cbuf = new Uint8Array(100);
+      /**
+       * @type {Array<Uint8Array>}
+       */
+      this.bufs = [];
     }
   }
 
-  /* istanbul ignore next */
   /**
-   * @type {any}
+   * @function
+   * @return {Encoder}
    */
-  let _localStorage = new VarStoragePolyfill();
-  let usePolyfill = true;
-
-  try {
-    // if the same-origin rule is violated, accessing localStorage might thrown an error
-    /* istanbul ignore next */
-    if (typeof localStorage !== 'undefined') {
-      _localStorage = localStorage;
-      usePolyfill = false;
-    }
-  } catch (e) { }
-
-  /* istanbul ignore next */
-  /**
-   * This is basically localStorage in browser, or a polyfill in nodejs
-   */
-  const varStorage = _localStorage;
+  const createEncoder = () => new Encoder();
 
   /**
-   * Utility module to work with Arrays.
+   * The current length of the encoded data.
    *
-   * @module array
-   */
-
-  /**
-   * Return the last element of an array. The element must exist
-   *
-   * @template L
-   * @param {Array<L>} arr
-   * @return {L}
-   */
-  const last = arr => arr[arr.length - 1];
-
-  /**
-   * Utility functions for working with EcmaScript objects.
-   *
-   * @module object
-   */
-
-  /**
-   * @param {Object<string,any>} obj
-   */
-  const keys = Object.keys;
-
-  /**
-   * @param {Object<string,any>} obj
-   * @param {function(any,string):any} f
-   */
-  const forEach = (obj, f) => {
-    for (const key in obj) {
-      f(obj[key], key);
-    }
-  };
-
-  /**
-   * @template R
-   * @param {Object<string,any>} obj
-   * @param {function(any,string):R} f
-   * @return {Array<R>}
-   */
-  const map$1 = (obj, f) => {
-    const results = [];
-    for (const key in obj) {
-      results.push(f(obj[key], key));
-    }
-    return results
-  };
-
-  /**
-   * @param {Object<string,any>} obj
+   * @function
+   * @param {Encoder} encoder
    * @return {number}
    */
-  const length = obj => keys(obj).length;
+  const length = encoder => {
+    let len = encoder.cpos;
+    for (let i = 0; i < encoder.bufs.length; i++) {
+      len += encoder.bufs[i].length;
+    }
+    return len
+  };
 
   /**
-   * Calls `Object.prototype.hasOwnProperty`.
+   * Transform to Uint8Array.
    *
-   * @param {any} obj
-   * @param {string|symbol} key
-   * @return {boolean}
+   * @function
+   * @param {Encoder} encoder
+   * @return {Uint8Array} The created ArrayBuffer.
    */
-  const hasProperty = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+  const toUint8Array = encoder => {
+    const uint8arr = new Uint8Array(length(encoder));
+    let curPos = 0;
+    for (let i = 0; i < encoder.bufs.length; i++) {
+      const d = encoder.bufs[i];
+      uint8arr.set(d, curPos);
+      curPos += d.length;
+    }
+    uint8arr.set(new Uint8Array(encoder.cbuf.buffer, 0, encoder.cpos), curPos);
+    return uint8arr
+  };
 
   /**
-   * Common functions and function call helpers.
+   * Write one byte to the encoder.
    *
-   * @module function
+   * @function
+   * @param {Encoder} encoder
+   * @param {number} num The byte that is to be encoded.
    */
+  const write = (encoder, num) => {
+    const bufferLen = encoder.cbuf.length;
+    if (encoder.cpos === bufferLen) {
+      encoder.bufs.push(encoder.cbuf);
+      encoder.cbuf = new Uint8Array(bufferLen * 2);
+      encoder.cpos = 0;
+    }
+    encoder.cbuf[encoder.cpos++] = num;
+  };
 
   /**
-   * @template V
-   * @template {V} OPTS
+   * Write a variable length unsigned integer. Max encodable integer is 2^53.
    *
-   * @param {V} value
-   * @param {Array<OPTS>} options
+   * @function
+   * @param {Encoder} encoder
+   * @param {number} num The number that is to be encoded.
    */
-  // @ts-ignore
-  const isOneOf = (value, options) => options.includes(value);
+  const writeVarUint = (encoder, num) => {
+    while (num > BITS7) {
+      write(encoder, BIT8 | (BITS7 & num));
+      num = floor(num / 128); // shift >>> 7
+    }
+    write(encoder, BITS7 & num);
+  };
 
   /**
-   * Isomorphic module to work access the environment (query params, env variables).
+   * A cache to store strings temporarily
+   */
+  const _strBuffer = new Uint8Array(30000);
+  const _maxStrBSize = _strBuffer.length / 3;
+
+  /**
+   * Write a variable length string.
    *
-   * @module map
+   * @function
+   * @param {Encoder} encoder
+   * @param {String} str The string that is to be encoded.
    */
-
-  /* istanbul ignore next */
-  // @ts-ignore
-  const isNode = typeof process !== 'undefined' && process.release &&
-    /node|io\.js/.test(process.release.name);
-  /* istanbul ignore next */
-  const isBrowser = typeof window !== 'undefined' && !isNode;
-  /* istanbul ignore next */
-  const isMac = typeof navigator !== 'undefined'
-    ? /Mac/.test(navigator.platform)
-    : false;
-
-  /**
-   * @type {Map<string,string>}
-   */
-  let params;
-
-  /* istanbul ignore next */
-  const computeParams = () => {
-    if (params === undefined) {
-      if (isNode) {
-        params = create();
-        const pargs = process.argv;
-        let currParamName = null;
-        /* istanbul ignore next */
-        for (let i = 0; i < pargs.length; i++) {
-          const parg = pargs[i];
-          if (parg[0] === '-') {
-            if (currParamName !== null) {
-              params.set(currParamName, '');
-            }
-            currParamName = parg;
-          } else {
-            if (currParamName !== null) {
-              params.set(currParamName, parg);
-              currParamName = null;
-            }
-          }
-        }
-        if (currParamName !== null) {
-          params.set(currParamName, '');
-        }
-        // in ReactNative for example this would not be true (unless connected to the Remote Debugger)
-      } else if (typeof location === 'object') {
-        params = create(); // eslint-disable-next-line no-undef
-        (location.search || '?').slice(1).split('&').forEach((kv) => {
-          if (kv.length !== 0) {
-            const [key, value] = kv.split('=');
-            params.set(`--${fromCamelCase(key, '-')}`, value);
-            params.set(`-${fromCamelCase(key, '-')}`, value);
-          }
-        });
-      } else {
-        params = create();
+  const _writeVarStringNative = (encoder, str) => {
+    if (str.length < _maxStrBSize) {
+      // We can encode the string into the existing buffer
+      /* c8 ignore next */
+      const written = utf8TextEncoder.encodeInto(str, _strBuffer).written || 0;
+      writeVarUint(encoder, written);
+      for (let i = 0; i < written; i++) {
+        write(encoder, _strBuffer[i]);
       }
+    } else {
+      writeVarUint8Array(encoder, encodeUtf8(str));
     }
-    return params
   };
 
   /**
-   * @param {string} name
-   * @return {boolean}
-   */
-  /* istanbul ignore next */
-  const hasParam = (name) => computeParams().has(name);
-
-  /**
-   * @param {string} name
-   * @param {string} defaultVal
-   * @return {string}
-   */
-  /* istanbul ignore next */
-  const getParam = (name, defaultVal) =>
-    computeParams().get(name) || defaultVal;
-  // export const getArgs = name => computeParams() && args
-
-  /**
-   * @param {string} name
-   * @return {string|null}
-   */
-  /* istanbul ignore next */
-  const getVariable = (name) =>
-    isNode
-      ? undefinedToNull(process.env[name.toUpperCase()])
-      : undefinedToNull(varStorage.getItem(name));
-
-  /**
-   * @param {string} name
-   * @return {boolean}
-   */
-  /* istanbul ignore next */
-  const hasConf = (name) =>
-    hasParam('--' + name) || getVariable(name) !== null;
-
-  /* istanbul ignore next */
-  const production = hasConf('production');
-
-  /* istanbul ignore next */
-  const forceColor = isNode &&
-    isOneOf(process.env.FORCE_COLOR, ['true', '1', '2']);
-
-  /* istanbul ignore next */
-  const supportsColor = !hasParam('no-colors') &&
-    (!isNode || process.stdout.isTTY || forceColor) && (
-    !isNode || hasParam('color') || forceColor ||
-      getVariable('COLORTERM') !== null ||
-      (getVariable('TERM') || '').includes('color')
-  );
-
-  /* eslint-env browser */
-  const BIT8 = 128;
-  const BITS7 = 127;
-  const BITS8 = 255;
-  /**
-   * @type {number}
-   */
-  const BITS32 = 0xFFFFFFFF;
-
-  /**
-   * Common Math expressions.
+   * Write a variable length string.
    *
-   * @module math
-   */
-
-  const floor = Math.floor;
-  const ceil = Math.ceil;
-  const round = Math.round;
-  const log10 = Math.log10;
-
-  /**
    * @function
-   * @param {number} a
-   * @param {number} b
-   * @return {number} The sum of a and b
+   * @param {Encoder} encoder
+   * @param {String} str The string that is to be encoded.
    */
-  const add = (a, b) => a + b;
+  const _writeVarStringPolyfill = (encoder, str) => {
+    const encodedString = unescape(encodeURIComponent(str));
+    const len = encodedString.length;
+    writeVarUint(encoder, len);
+    for (let i = 0; i < len; i++) {
+      write(encoder, /** @type {number} */ (encodedString.codePointAt(i)));
+    }
+  };
 
   /**
-   * @function
-   * @param {number} a
-   * @param {number} b
-   * @return {number} The smaller element of a and b
-   */
-  const min = (a, b) => a < b ? a : b;
-
-  /**
-   * @function
-   * @param {number} a
-   * @param {number} b
-   * @return {number} The bigger element of a and b
-   */
-  const max = (a, b) => a > b ? a : b;
-  /**
-   * Base 10 exponential function. Returns the value of 10 raised to the power of pow.
+   * Write a variable length string.
    *
-   * @param {number} exp
-   * @return {number}
+   * @function
+   * @param {Encoder} encoder
+   * @param {String} str The string that is to be encoded.
    */
-  const exp10 = exp => Math.pow(10, exp);
+  /* c8 ignore next */
+  const writeVarString = (utf8TextEncoder && /** @type {any} */ (utf8TextEncoder).encodeInto) ? _writeVarStringNative : _writeVarStringPolyfill;
 
   /**
-   * Utility helpers for working with numbers.
+   * Append fixed-length Uint8Array to the encoder.
    *
-   * @module number
+   * @function
+   * @param {Encoder} encoder
+   * @param {Uint8Array} uint8Array
    */
+  const writeUint8Array = (encoder, uint8Array) => {
+    const bufferLen = encoder.cbuf.length;
+    const cpos = encoder.cpos;
+    const leftCopyLen = min(bufferLen - cpos, uint8Array.length);
+    const rightCopyLen = uint8Array.length - leftCopyLen;
+    encoder.cbuf.set(uint8Array.subarray(0, leftCopyLen), cpos);
+    encoder.cpos += leftCopyLen;
+    if (rightCopyLen > 0) {
+      // Still something to write, write right half..
+      // Append new buffer
+      encoder.bufs.push(encoder.cbuf);
+      // must have at least size of remaining buffer
+      encoder.cbuf = new Uint8Array(max(bufferLen * 2, rightCopyLen));
+      // copy array
+      encoder.cbuf.set(uint8Array.subarray(leftCopyLen));
+      encoder.cpos = rightCopyLen;
+    }
+  };
 
-  const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+  /**
+   * Append an Uint8Array to Encoder.
+   *
+   * @function
+   * @param {Encoder} encoder
+   * @param {Uint8Array} uint8Array
+   */
+  const writeVarUint8Array = (encoder, uint8Array) => {
+    writeVarUint(encoder, uint8Array.byteLength);
+    writeUint8Array(encoder, uint8Array);
+  };
 
   /**
    * Error helpers.
@@ -439,11 +369,11 @@
    * @module error
    */
 
-  /* istanbul ignore next */
   /**
    * @param {string} s
    * @return {Error}
    */
+  /* c8 ignore next */
   const create$1 = s => new Error(s);
 
   /**
@@ -457,7 +387,7 @@
    *
    * ```js
    * // encoding step
-   * const encoder = new encoding.createEncoder()
+   * const encoder = encoding.createEncoder()
    * encoding.writeVarUint(encoder, 256)
    * encoding.writeVarString(encoder, 'Hello world!')
    * const buf = encoding.toUint8Array(encoder)
@@ -465,7 +395,7 @@
    *
    * ```js
    * // decoding step
-   * const decoder = new decoding.createDecoder(buf)
+   * const decoder = decoding.createDecoder(buf)
    * decoding.readVarUint(decoder) // => 256
    * decoding.readVarString(decoder) // => 'Hello world!'
    * decoding.hasContent(decoder) // => false - all data is read
@@ -519,7 +449,7 @@
    * @return {Uint8Array}
    */
   const readUint8Array = (decoder, len) => {
-    const view = createUint8ArrayViewFromArrayBuffer(decoder.arr.buffer, decoder.pos + decoder.arr.byteOffset, len);
+    const view = new Uint8Array(decoder.arr.buffer, decoder.pos + decoder.arr.byteOffset, len);
     decoder.pos += len;
     return view
   };
@@ -566,10 +496,11 @@
       if (r < BIT8) {
         return num
       }
-      /* istanbul ignore if */
+      /* c8 ignore start */
       if (num > MAX_SAFE_INTEGER) {
         throw errorIntegerOutOfRange
       }
+      /* c8 ignore stop */
     }
     throw errorUnexpectedEndOfArray
   };
@@ -587,7 +518,7 @@
    * @param {Decoder} decoder
    * @return {String} The read String.
    */
-  /* istanbul ignore next */
+  /* c8 ignore start */
   const _readVarStringPolyfill = decoder => {
     let remainingLen = readVarUint(decoder);
     if (remainingLen === 0) {
@@ -612,6 +543,7 @@
       return decodeURIComponent(escape(encodedString))
     }
   };
+  /* c8 ignore stop */
 
   /**
    * @function
@@ -630,233 +562,8 @@
    * @return {String} The read String
    *
    */
-  /* istanbul ignore next */
+  /* c8 ignore next */
   const readVarString = utf8TextDecoder ? _readVarStringNative : _readVarStringPolyfill;
-
-  /**
-   * Utility functions to work with buffers (Uint8Array).
-   *
-   * @module buffer
-   */
-
-  /**
-   * @param {number} len
-   */
-  const createUint8ArrayFromLen = len => new Uint8Array(len);
-
-  /**
-   * Create Uint8Array with initial content from buffer
-   *
-   * @param {ArrayBuffer} buffer
-   * @param {number} byteOffset
-   * @param {number} length
-   */
-  const createUint8ArrayViewFromArrayBuffer = (buffer, byteOffset, length) => new Uint8Array(buffer, byteOffset, length);
-
-  /**
-   * Efficient schema-less binary encoding with support for variable length encoding.
-   *
-   * Use [lib0/encoding] with [lib0/decoding]. Every encoding function has a corresponding decoding function.
-   *
-   * Encodes numbers in little-endian order (least to most significant byte order)
-   * and is compatible with Golang's binary encoding (https://golang.org/pkg/encoding/binary/)
-   * which is also used in Protocol Buffers.
-   *
-   * ```js
-   * // encoding step
-   * const encoder = new encoding.createEncoder()
-   * encoding.writeVarUint(encoder, 256)
-   * encoding.writeVarString(encoder, 'Hello world!')
-   * const buf = encoding.toUint8Array(encoder)
-   * ```
-   *
-   * ```js
-   * // decoding step
-   * const decoder = new decoding.createDecoder(buf)
-   * decoding.readVarUint(decoder) // => 256
-   * decoding.readVarString(decoder) // => 'Hello world!'
-   * decoding.hasContent(decoder) // => false - all data is read
-   * ```
-   *
-   * @module encoding
-   */
-
-  /**
-   * A BinaryEncoder handles the encoding to an Uint8Array.
-   */
-  class Encoder {
-    constructor () {
-      this.cpos = 0;
-      this.cbuf = new Uint8Array(100);
-      /**
-       * @type {Array<Uint8Array>}
-       */
-      this.bufs = [];
-    }
-  }
-
-  /**
-   * @function
-   * @return {Encoder}
-   */
-  const createEncoder = () => new Encoder();
-
-  /**
-   * The current length of the encoded data.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @return {number}
-   */
-  const length$1 = encoder => {
-    let len = encoder.cpos;
-    for (let i = 0; i < encoder.bufs.length; i++) {
-      len += encoder.bufs[i].length;
-    }
-    return len
-  };
-
-  /**
-   * Transform to Uint8Array.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @return {Uint8Array} The created ArrayBuffer.
-   */
-  const toUint8Array = encoder => {
-    const uint8arr = new Uint8Array(length$1(encoder));
-    let curPos = 0;
-    for (let i = 0; i < encoder.bufs.length; i++) {
-      const d = encoder.bufs[i];
-      uint8arr.set(d, curPos);
-      curPos += d.length;
-    }
-    uint8arr.set(createUint8ArrayViewFromArrayBuffer(encoder.cbuf.buffer, 0, encoder.cpos), curPos);
-    return uint8arr
-  };
-
-  /**
-   * Write one byte to the encoder.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {number} num The byte that is to be encoded.
-   */
-  const write = (encoder, num) => {
-    const bufferLen = encoder.cbuf.length;
-    if (encoder.cpos === bufferLen) {
-      encoder.bufs.push(encoder.cbuf);
-      encoder.cbuf = new Uint8Array(bufferLen * 2);
-      encoder.cpos = 0;
-    }
-    encoder.cbuf[encoder.cpos++] = num;
-  };
-
-  /**
-   * Write a variable length unsigned integer. Max encodable integer is 2^53.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {number} num The number that is to be encoded.
-   */
-  const writeVarUint = (encoder, num) => {
-    while (num > BITS7) {
-      write(encoder, BIT8 | (BITS7 & num));
-      num = floor(num / 128); // shift >>> 7
-    }
-    write(encoder, BITS7 & num);
-  };
-
-  /**
-   * A cache to store strings temporarily
-   */
-  const _strBuffer = new Uint8Array(30000);
-  const _maxStrBSize = _strBuffer.length / 3;
-
-  /**
-   * Write a variable length string.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {String} str The string that is to be encoded.
-   */
-  const _writeVarStringNative = (encoder, str) => {
-    if (str.length < _maxStrBSize) {
-      // We can encode the string into the existing buffer
-      /* istanbul ignore else */
-      const written = utf8TextEncoder.encodeInto(str, _strBuffer).written || 0;
-      writeVarUint(encoder, written);
-      for (let i = 0; i < written; i++) {
-        write(encoder, _strBuffer[i]);
-      }
-    } else {
-      writeVarUint8Array(encoder, encodeUtf8(str));
-    }
-  };
-
-  /**
-   * Write a variable length string.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {String} str The string that is to be encoded.
-   */
-  const _writeVarStringPolyfill = (encoder, str) => {
-    const encodedString = unescape(encodeURIComponent(str));
-    const len = encodedString.length;
-    writeVarUint(encoder, len);
-    for (let i = 0; i < len; i++) {
-      write(encoder, /** @type {number} */ (encodedString.codePointAt(i)));
-    }
-  };
-
-  /**
-   * Write a variable length string.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {String} str The string that is to be encoded.
-   */
-  /* istanbul ignore next */
-  const writeVarString = (utf8TextEncoder && utf8TextEncoder.encodeInto) ? _writeVarStringNative : _writeVarStringPolyfill;
-
-  /**
-   * Append fixed-length Uint8Array to the encoder.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {Uint8Array} uint8Array
-   */
-  const writeUint8Array = (encoder, uint8Array) => {
-    const bufferLen = encoder.cbuf.length;
-    const cpos = encoder.cpos;
-    const leftCopyLen = min(bufferLen - cpos, uint8Array.length);
-    const rightCopyLen = uint8Array.length - leftCopyLen;
-    encoder.cbuf.set(uint8Array.subarray(0, leftCopyLen), cpos);
-    encoder.cpos += leftCopyLen;
-    if (rightCopyLen > 0) {
-      // Still something to write, write right half..
-      // Append new buffer
-      encoder.bufs.push(encoder.cbuf);
-      // must have at least size of remaining buffer
-      encoder.cbuf = new Uint8Array(max(bufferLen * 2, rightCopyLen));
-      // copy array
-      encoder.cbuf.set(uint8Array.subarray(leftCopyLen));
-      encoder.cpos = rightCopyLen;
-    }
-  };
-
-  /**
-   * Append an Uint8Array to Encoder.
-   *
-   * @function
-   * @param {Encoder} encoder
-   * @param {Uint8Array} uint8Array
-   */
-  const writeVarUint8Array = (encoder, uint8Array) => {
-    writeVarUint(encoder, uint8Array.byteLength);
-    writeUint8Array(encoder, uint8Array);
-  };
 
   /**
    * Utility module to convert metric values.
@@ -918,7 +625,7 @@
       return days + 'd' + ((hours > 0 || minutes > 30) ? ' ' + (minutes > 30 ? hours + 1 : hours) + 'h' : '')
     }
     if (hours > 0) {
-      /* istanbul ignore next */
+      /* c8 ignore next */
       return hours + 'h' + ((minutes > 0 || seconds > 30) ? ' ' + (seconds > 30 ? minutes + 1 : minutes) + 'min' : '')
     }
     return minutes + 'min' + (seconds > 0 ? ' ' + seconds + 's' : '')
@@ -929,6 +636,15 @@
    *
    * @module promise
    */
+
+  /**
+   * `Promise.all` wait for all promises in the array to resolve and return the result
+   * @template {unknown[] | []} PS
+   *
+   * @param {PS} ps
+   * @return {Promise<{ -readonly [P in keyof PS]: Awaited<PS[P]> }>}
+   */
+  const all = Promise.all.bind(Promise);
 
   /**
    * @param {Error} [reason]
@@ -1042,17 +758,291 @@
   };
 
   /**
-   * Utility module to work with EcmaScript Symbols.
+   * Utility module to work with key-value stores.
    *
-   * @module symbol
+   * @module map
    */
 
   /**
-   * Return fresh symbol.
+   * Creates a new Map instance.
    *
-   * @return {Symbol}
+   * @function
+   * @return {Map<any, any>}
+   *
+   * @function
    */
-  const create$2 = Symbol;
+  const create$2 = () => new Map();
+
+  /**
+   * Creates an Array and populates it with the content of all key-value pairs using the `f(value, key)` function.
+   *
+   * @function
+   * @template K
+   * @template V
+   * @template R
+   * @param {Map<K,V>} m
+   * @param {function(V,K):R} f
+   * @return {Array<R>}
+   */
+  const map = (m, f) => {
+    const res = [];
+    for (const [key, value] of m) {
+      res.push(f(value, key));
+    }
+    return res
+  };
+
+  /**
+   * Often used conditions.
+   *
+   * @module conditions
+   */
+
+  /**
+   * @template T
+   * @param {T|null|undefined} v
+   * @return {T|null}
+   */
+  /* c8 ignore next */
+  const undefinedToNull = v => v === undefined ? null : v;
+
+  /* eslint-env browser */
+
+  /**
+   * Isomorphic variable storage.
+   *
+   * Uses LocalStorage in the browser and falls back to in-memory storage.
+   *
+   * @module storage
+   */
+
+  /* c8 ignore start */
+  class VarStoragePolyfill {
+    constructor () {
+      this.map = new Map();
+    }
+
+    /**
+     * @param {string} key
+     * @param {any} newValue
+     */
+    setItem (key, newValue) {
+      this.map.set(key, newValue);
+    }
+
+    /**
+     * @param {string} key
+     */
+    getItem (key) {
+      return this.map.get(key)
+    }
+  }
+  /* c8 ignore stop */
+
+  /**
+   * @type {any}
+   */
+  let _localStorage = new VarStoragePolyfill();
+  let usePolyfill = true;
+
+  /* c8 ignore start */
+  try {
+    // if the same-origin rule is violated, accessing localStorage might thrown an error
+    if (typeof localStorage !== 'undefined' && localStorage) {
+      _localStorage = localStorage;
+      usePolyfill = false;
+    }
+  } catch (e) { }
+  /* c8 ignore stop */
+
+  /**
+   * This is basically localStorage in browser, or a polyfill in nodejs
+   */
+  /* c8 ignore next */
+  const varStorage = _localStorage;
+
+  /**
+   * Utility functions for working with EcmaScript objects.
+   *
+   * @module object
+   */
+
+  /**
+   * @param {Object<string,any>} obj
+   */
+  const keys = Object.keys;
+
+  /**
+   * @template V
+   * @param {{[k:string]:V}} obj
+   * @param {function(V,string):any} f
+   */
+  const forEach = (obj, f) => {
+    for (const key in obj) {
+      f(obj[key], key);
+    }
+  };
+
+  /**
+   * @todo implement mapToArray & map
+   *
+   * @template R
+   * @param {Object<string,any>} obj
+   * @param {function(any,string):R} f
+   * @return {Array<R>}
+   */
+  const map$1 = (obj, f) => {
+    const results = [];
+    for (const key in obj) {
+      results.push(f(obj[key], key));
+    }
+    return results
+  };
+
+  /**
+   * @param {Object<string,any>} obj
+   * @return {number}
+   */
+  const length$1 = obj => keys(obj).length;
+
+  /**
+   * Calls `Object.prototype.hasOwnProperty`.
+   *
+   * @param {any} obj
+   * @param {string|symbol} key
+   * @return {boolean}
+   */
+  const hasProperty = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+  /**
+   * Common functions and function call helpers.
+   *
+   * @module function
+   */
+
+  /**
+   * @template V
+   * @template {V} OPTS
+   *
+   * @param {V} value
+   * @param {Array<OPTS>} options
+   */
+  // @ts-ignore
+  const isOneOf = (value, options) => options.includes(value);
+
+  /**
+   * Isomorphic module to work access the environment (query params, env variables).
+   *
+   * @module map
+   */
+
+  /* c8 ignore next 2 */
+  // @ts-ignore
+  const isNode = typeof process !== 'undefined' && process.release && /node|io\.js/.test(process.release.name) && Object.prototype.toString.call(typeof process !== 'undefined' ? process : 0) === '[object process]';
+
+  /* c8 ignore next */
+  const isBrowser = typeof window !== 'undefined' && typeof document !== 'undefined' && !isNode;
+  /* c8 ignore next 3 */
+  const isMac = typeof navigator !== 'undefined'
+    ? /Mac/.test(navigator.platform)
+    : false;
+
+  /**
+   * @type {Map<string,string>}
+   */
+  let params;
+
+  /* c8 ignore start */
+  const computeParams = () => {
+    if (params === undefined) {
+      if (isNode) {
+        params = create$2();
+        const pargs = process.argv;
+        let currParamName = null;
+        for (let i = 0; i < pargs.length; i++) {
+          const parg = pargs[i];
+          if (parg[0] === '-') {
+            if (currParamName !== null) {
+              params.set(currParamName, '');
+            }
+            currParamName = parg;
+          } else {
+            if (currParamName !== null) {
+              params.set(currParamName, parg);
+              currParamName = null;
+            }
+          }
+        }
+        if (currParamName !== null) {
+          params.set(currParamName, '');
+        }
+        // in ReactNative for example this would not be true (unless connected to the Remote Debugger)
+      } else if (typeof location === 'object') {
+        params = create$2(); // eslint-disable-next-line no-undef
+        (location.search || '?').slice(1).split('&').forEach((kv) => {
+          if (kv.length !== 0) {
+            const [key, value] = kv.split('=');
+            params.set(`--${fromCamelCase(key, '-')}`, value);
+            params.set(`-${fromCamelCase(key, '-')}`, value);
+          }
+        });
+      } else {
+        params = create$2();
+      }
+    }
+    return params
+  };
+  /* c8 ignore stop */
+
+  /**
+   * @param {string} name
+   * @return {boolean}
+   */
+  /* c8 ignore next */
+  const hasParam = (name) => computeParams().has(name);
+
+  /**
+   * @param {string} name
+   * @param {string} defaultVal
+   * @return {string}
+   */
+  /* c8 ignore next 2 */
+  const getParam = (name, defaultVal) =>
+    computeParams().get(name) || defaultVal;
+
+  /**
+   * @param {string} name
+   * @return {string|null}
+   */
+  /* c8 ignore next 4 */
+  const getVariable = (name) =>
+    isNode
+      ? undefinedToNull(process.env[name.toUpperCase()])
+      : undefinedToNull(varStorage.getItem(name));
+
+  /**
+   * @param {string} name
+   * @return {boolean}
+   */
+  /* c8 ignore next 2 */
+  const hasConf = (name) =>
+    hasParam('--' + name) || getVariable(name) !== null;
+
+  /* c8 ignore next */
+  const production = hasConf('production');
+
+  /* c8 ignore next 2 */
+  const forceColor = isNode &&
+    isOneOf(process.env.FORCE_COLOR, ['true', '1', '2']);
+
+  /* c8 ignore start */
+  const supportsColor = !hasParam('no-colors') &&
+    (!isNode || process.stdout.isTTY || forceColor) && (
+    !isNode || hasParam('color') || forceColor ||
+      getVariable('COLORTERM') !== null ||
+      (getVariable('TERM') || '').includes('color')
+  );
+  /* c8 ignore stop */
 
   /**
    * Working with value pairs.
@@ -1091,7 +1081,7 @@
 
   /* eslint-env browser */
 
-  /* istanbul ignore next */
+  /* c8 ignore start */
   /**
    * @type {Document}
    */
@@ -1101,23 +1091,19 @@
    * @param {string} name
    * @return {HTMLElement}
    */
-  /* istanbul ignore next */
   const createElement = name => doc.createElement(name);
 
   /**
    * @return {DocumentFragment}
    */
-  /* istanbul ignore next */
   const createDocumentFragment = () => doc.createDocumentFragment();
 
   /**
    * @param {string} text
    * @return {Text}
    */
-  /* istanbul ignore next */
   const createTextNode = text => doc.createTextNode(text);
 
-  /* istanbul ignore next */
   const domParser = /** @type {DOMParser} */ (typeof DOMParser !== 'undefined' ? new DOMParser() : null);
 
   /**
@@ -1125,7 +1111,6 @@
    * @param {Array<pair.Pair<string,string|boolean>>} attrs Array of key-value pairs
    * @return {Element}
    */
-  /* istanbul ignore next */
   const setAttributes = (el, attrs) => {
     forEach$1(attrs, (key, value) => {
       if (value === false) {
@@ -1144,7 +1129,6 @@
    * @param {Array<Node>|HTMLCollection} children
    * @return {DocumentFragment}
    */
-  /* istanbul ignore next */
   const fragment = children => {
     const fragment = createDocumentFragment();
     for (let i = 0; i < children.length; i++) {
@@ -1158,7 +1142,6 @@
    * @param {Array<Node>} nodes
    * @return {Element}
    */
-  /* istanbul ignore next */
   const append = (parent, nodes) => {
     appendChild(parent, fragment(nodes));
     return parent
@@ -1169,7 +1152,6 @@
    * @param {string} name
    * @param {EventListener} f
    */
-  /* istanbul ignore next */
   const addEventListener = (el, name, f) => el.addEventListener(name, f);
 
   /**
@@ -1178,7 +1160,6 @@
    * @param {Array<Node>} children
    * @return {Element}
    */
-  /* istanbul ignore next */
   const element = (name, attrs = [], children = []) =>
     append(setAttributes(createElement(name), attrs), children);
 
@@ -1186,14 +1167,12 @@
    * @param {string} t
    * @return {Text}
    */
-  /* istanbul ignore next */
   const text = createTextNode;
 
   /**
    * @param {Map<string,string>} m
    * @return {string}
    */
-  /* istanbul ignore next */
   const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
 
   /**
@@ -1201,8 +1180,8 @@
    * @param {Node} child
    * @return {Node}
    */
-  /* istanbul ignore next */
   const appendChild = (parent, child) => parent.appendChild(child);
+  /* c8 ignore stop */
 
   /**
    * JSON utility functions.
@@ -1249,20 +1228,52 @@
   };
 
   /**
+   * Utility module to work with EcmaScript Symbols.
+   *
+   * @module symbol
+   */
+
+  /**
+   * Return fresh symbol.
+   *
+   * @return {Symbol}
+   */
+  const create$4 = Symbol;
+
+  const BOLD = create$4();
+  const UNBOLD = create$4();
+  const BLUE = create$4();
+  const GREY = create$4();
+  const GREEN = create$4();
+  const RED = create$4();
+  const PURPLE = create$4();
+  const ORANGE = create$4();
+  const UNCOLOR = create$4();
+
+  /* c8 ignore start */
+  /**
+   * @param {Array<string|Symbol|Object|number>} args
+   * @return {Array<string|object|number>}
+   */
+  const computeNoColorLoggingArgs = args => {
+    const logArgs = [];
+    // try with formatting until we find something unsupported
+    let i = 0;
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      if (arg.constructor === String || arg.constructor === Number) ; else if (arg.constructor === Object) {
+        logArgs.push(JSON.stringify(arg));
+      }
+    }
+    return logArgs
+  };
+  /* c8 ignore stop */
+
+  /**
    * Isomorphic logging module with support for colors!
    *
    * @module logging
    */
-
-  const BOLD = create$2();
-  const UNBOLD = create$2();
-  const BLUE = create$2();
-  const GREY = create$2();
-  const GREEN = create$2();
-  const RED = create$2();
-  const PURPLE = create$2();
-  const ORANGE = create$2();
-  const UNCOLOR = create$2();
 
   /**
    * @type {Object<Symbol,pair.Pair<string,string>>}
@@ -1279,34 +1290,21 @@
     [UNCOLOR]: create$3('color', 'black')
   };
 
-  const _nodeStyleMap = {
-    [BOLD]: '\u001b[1m',
-    [UNBOLD]: '\u001b[2m',
-    [BLUE]: '\x1b[34m',
-    [GREEN]: '\x1b[32m',
-    [GREY]: '\u001b[37m',
-    [RED]: '\x1b[31m',
-    [PURPLE]: '\x1b[35m',
-    [ORANGE]: '\x1b[38;5;208m',
-    [UNCOLOR]: '\x1b[0m'
-  };
-
-  /* istanbul ignore next */
   /**
    * @param {Array<string|Symbol|Object|number>} args
    * @return {Array<string|object|number>}
    */
+  /* c8 ignore start */
   const computeBrowserLoggingArgs = (args) => {
     const strBuilder = [];
     const styles = [];
-    const currentStyle = create();
+    const currentStyle = create$2();
     /**
      * @type {Array<string|Object|number>}
      */
     let logArgs = [];
     // try with formatting until we find something unsupported
     let i = 0;
-
     for (; i < args.length; i++) {
       const arg = args[i];
       // @ts-ignore
@@ -1327,7 +1325,6 @@
         }
       }
     }
-
     if (i > 0) {
       // create logArgs with what we have so far
       logArgs = styles;
@@ -1342,119 +1339,39 @@
     }
     return logArgs
   };
+  /* c8 ignore stop */
 
-  /* istanbul ignore next */
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<string|object|number>}
-   */
-  const computeNoColorLoggingArgs = args => {
-    const strBuilder = [];
-    const logArgs = [];
-
-    // try with formatting until we find something unsupported
-    let i = 0;
-
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      // @ts-ignore
-      const style = _nodeStyleMap[arg];
-      if (style === undefined) {
-        if (arg.constructor === String || arg.constructor === Number) {
-          strBuilder.push(arg);
-        } else {
-          break
-        }
-      }
-    }
-    if (i > 0) {
-      logArgs.push(strBuilder.join(''));
-    }
-    // append the rest
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      /* istanbul ignore else */
-      if (!(arg instanceof Symbol)) {
-        if (arg.constructor === Object) {
-          logArgs.push(JSON.stringify(arg));
-        } else {
-          logArgs.push(arg);
-        }
-      }
-    }
-    return logArgs
-  };
-
-  /* istanbul ignore next */
-  /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<string|object|number>}
-   */
-  const computeNodeLoggingArgs = (args) => {
-    const strBuilder = [];
-    const logArgs = [];
-
-    // try with formatting until we find something unsupported
-    let i = 0;
-
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      // @ts-ignore
-      const style = _nodeStyleMap[arg];
-      if (style !== undefined) {
-        strBuilder.push(style);
-      } else {
-        if (arg.constructor === String || arg.constructor === Number) {
-          strBuilder.push(arg);
-        } else {
-          break
-        }
-      }
-    }
-    if (i > 0) {
-      // create logArgs with what we have so far
-      strBuilder.push('\x1b[0m');
-      logArgs.push(strBuilder.join(''));
-    }
-    // append the rest
-    for (; i < args.length; i++) {
-      const arg = args[i];
-      /* istanbul ignore else */
-      if (!(arg instanceof Symbol)) {
-        logArgs.push(arg);
-      }
-    }
-    return logArgs
-  };
-
-  /* istanbul ignore next */
+  /* c8 ignore start */
   const computeLoggingArgs = supportsColor
-    ? (isNode ? computeNodeLoggingArgs : computeBrowserLoggingArgs)
+    ? computeBrowserLoggingArgs
     : computeNoColorLoggingArgs;
+  /* c8 ignore stop */
 
   /**
    * @param {Array<string|Symbol|Object|number>} args
    */
   const print = (...args) => {
     console.log(...computeLoggingArgs(args));
-    /* istanbul ignore next */
+    /* c8 ignore next */
     vconsoles.forEach((vc) => vc.print(args));
   };
+  /* c8 ignore stop */
 
-  /* istanbul ignore next */
   /**
    * @param {Error} err
    */
+  /* c8 ignore start */
   const printError = (err) => {
     console.error(err);
     vconsoles.forEach((vc) => vc.printError(err));
   };
+  /* c8 ignore stop */
 
-  /* istanbul ignore next */
   /**
    * @param {string} url image location
    * @param {number} height height of the image in pixel
    */
+  /* c8 ignore start */
   const printImg = (url, height) => {
     if (isBrowser) {
       console.log(
@@ -1465,12 +1382,13 @@
     }
     vconsoles.forEach((vc) => vc.printImg(url, height));
   };
+  /* c8 ignore stop */
 
-  /* istanbul ignore next */
   /**
    * @param {string} base64
    * @param {number} height
    */
+  /* c8 ignore next 2 */
   const printImgBase64 = (base64, height) =>
     printImg(`data:image/gif;base64,${base64}`, height);
 
@@ -1479,7 +1397,7 @@
    */
   const group = (...args) => {
     console.group(...computeLoggingArgs(args));
-    /* istanbul ignore next */
+    /* c8 ignore next */
     vconsoles.forEach((vc) => vc.group(args));
   };
 
@@ -1488,23 +1406,23 @@
    */
   const groupCollapsed = (...args) => {
     console.groupCollapsed(...computeLoggingArgs(args));
-    /* istanbul ignore next */
+    /* c8 ignore next */
     vconsoles.forEach((vc) => vc.groupCollapsed(args));
   };
 
   const groupEnd = () => {
     console.groupEnd();
-    /* istanbul ignore next */
+    /* c8 ignore next */
     vconsoles.forEach((vc) => vc.groupEnd());
   };
 
-  const vconsoles = new Set();
+  const vconsoles = create();
 
-  /* istanbul ignore next */
   /**
    * @param {Array<string|Symbol|Object|number>} args
    * @return {Array<Element>}
    */
+  /* c8 ignore start */
   const _computeLineSpans = (args) => {
     const spans = [];
     const currentStyle = new Map();
@@ -1545,11 +1463,12 @@
     }
     return spans
   };
+  /* c8 ignore stop */
 
   const lineStyle =
     'font-family:monospace;border-bottom:1px solid #e2e2e2;padding:2px;';
 
-  /* istanbul ignore next */
+  /* c8 ignore start */
   class VConsole {
     /**
      * @param {Element} dom
@@ -1674,40 +1593,26 @@
       });
     }
   }
+  /* c8 ignore stop */
 
-  /* istanbul ignore next */
   /**
    * @param {Element} dom
    */
+  /* c8 ignore next */
   const createVConsole = (dom) => new VConsole(dom);
 
   /* eslint-env browser */
-  const performance = typeof window === 'undefined' ? null : (typeof window.performance !== 'undefined' && window.performance) || null;
-
-  const isoCrypto = typeof crypto === 'undefined' ? null : crypto;
+  const getRandomValues = crypto.getRandomValues.bind(crypto);
 
   /**
-   * @type {function(number):ArrayBuffer}
+   * Isomorphic module for true random numbers / buffers / uuids.
+   *
+   * Attention: falls back to Math.random if the browser does not support crypto.
+   *
+   * @module random
    */
-  const cryptoRandomBuffer = isoCrypto !== null
-    ? len => {
-      // browser
-      const buf = new ArrayBuffer(len);
-      const arr = new Uint8Array(buf);
-      isoCrypto.getRandomValues(arr);
-      return buf
-    }
-    : len => {
-      // polyfill
-      const buf = new ArrayBuffer(len);
-      const arr = new Uint8Array(buf);
-      for (let i = 0; i < len; i++) {
-        arr[i] = Math.ceil((Math.random() * 0xFFFFFFFF) >>> 0);
-      }
-      return buf
-    };
 
-  const uint32 = () => new Uint32Array(cryptoRandomBuffer(4))[0];
+  const uint32 = () => getRandomValues(new Uint32Array(1))[0];
 
   /**
    * @module prng
@@ -1853,6 +1758,17 @@
   */
 
   /**
+   * Utility functions to work with buffers (Uint8Array).
+   *
+   * @module buffer
+   */
+
+  /**
+   * @param {number} len
+   */
+  const createUint8ArrayFromLen = len => new Uint8Array(len);
+
+  /**
    * Fast Pseudo Random Number Generators.
    *
    * Given a seed a PRNG generates a sequence of numbers that cannot be reasonably predicted.
@@ -1873,7 +1789,6 @@
    * @typedef {Object} PRNG
    * @property {generatorNext} next Generate new number
    */
-
   const DefaultPRNG = Xoroshiro128plus;
 
   /**
@@ -1884,7 +1799,7 @@
    * @param {number} seed A positive 32bit integer. Do not use negative numbers.
    * @return {PRNG}
    */
-  const create$4 = seed => new DefaultPRNG(seed);
+  const create$5 = seed => new DefaultPRNG(seed);
 
   /**
    * Generates a random integer with 32 bit resolution.
@@ -1941,6 +1856,7 @@
     }
     return buf
   };
+  /* c8 ignore stop */
 
   /**
    * Utility helpers for generating statistics.
@@ -1959,6 +1875,12 @@
    * @return {number}
    */
   const average = arr => arr.reduce(add, 0) / arr.length;
+
+  /* eslint-env browser */
+
+  const measure = performance.measure.bind(performance);
+  const now = performance.now.bind(performance);
+  const mark = performance.mark.bind(performance);
 
   /**
    * Testing framework with support for generating tests.
@@ -2007,7 +1929,7 @@
 
   const extensive = hasConf('extensive');
 
-  /* istanbul ignore next */
+  /* c8 ignore next */
   const envSeed = hasParam('--seed') ? Number.parseInt(getParam('--seed', '0')) : null;
 
   class TestCase {
@@ -2024,6 +1946,12 @@
        * @type {string}
        */
       this.testName = testName;
+      /**
+       * This type can store custom information related to the TestCase
+       *
+       * @type {Map<string,any>}
+       */
+      this.meta = new Map();
       this._seed = null;
       this._prng = null;
     }
@@ -2036,11 +1964,11 @@
     /**
      * @type {number}
      */
-    /* istanbul ignore next */
+    /* c8 ignore next */
     get seed () {
-      /* istanbul ignore else */
+      /* c8 ignore else */
       if (this._seed === null) {
-        /* istanbul ignore next */
+        /* c8 ignore next */
         this._seed = envSeed === null ? uint32() : envSeed;
       }
       return this._seed
@@ -2052,20 +1980,20 @@
      * @type {prng.PRNG}
      */
     get prng () {
-      /* istanbul ignore else */
+      /* c8 ignore else */
       if (this._prng === null) {
-        this._prng = create$4(this.seed);
+        this._prng = create$5(this.seed);
       }
       return this._prng
     }
   }
 
   const repetitionTime = Number(getParam('--repetition-time', '50'));
-  /* istanbul ignore next */
+  /* c8 ignore next */
   const testFilter = hasParam('--filter') ? getParam('--filter', '') : null;
 
-  /* istanbul ignore next */
-  const testFilterRegExp = testFilter !== null ? new RegExp(testFilter) : new RegExp('.*');
+  /* c8 ignore next */
+  const testFilterRegExp = testFilter !== null ? new RegExp(testFilter) : /.*/;
 
   const repeatTestRegex = /^(repeat|repeating)\s/;
 
@@ -2079,27 +2007,27 @@
   const run = async (moduleName, name, f, i, numberOfTests) => {
     const uncamelized = fromCamelCase(name.slice(4), ' ');
     const filtered = !testFilterRegExp.test(`[${i + 1}/${numberOfTests}] ${moduleName}: ${uncamelized}`);
-    /* istanbul ignore if */
+    /* c8 ignore next 3 */
     if (filtered) {
       return true
     }
     const tc = new TestCase(moduleName, name);
     const repeat = repeatTestRegex.test(uncamelized);
     const groupArgs = [GREY, `[${i + 1}/${numberOfTests}] `, PURPLE, `${moduleName}: `, BLUE, uncamelized];
-    /* istanbul ignore next */
+    /* c8 ignore next 5 */
     if (testFilter === null) {
       groupCollapsed(...groupArgs);
     } else {
       group(...groupArgs);
     }
     const times = [];
-    const start = performance.now();
+    const start = now();
     let lastTime = start;
     /**
      * @type {any}
      */
     let err = null;
-    performance.mark(`${name}-start`);
+    mark(`${name}-start`);
     do {
       try {
         const p = f(tc);
@@ -2109,7 +2037,7 @@
       } catch (_err) {
         err = _err;
       }
-      const currTime = performance.now();
+      const currTime = now();
       times.push(currTime - lastTime);
       lastTime = currTime;
       if (repeat && err === null && (lastTime - start) < repetitionTime) {
@@ -2118,17 +2046,17 @@
         break
       }
     } while (err === null && (lastTime - start) < repetitionTime)
-    performance.mark(`${name}-end`);
-    /* istanbul ignore if */
+    mark(`${name}-end`);
+    /* c8 ignore next 3 */
     if (err !== null && err.constructor !== SkipError) {
       printError(err);
     }
-    performance.measure(name, `${name}-start`, `${name}-end`);
+    measure(name, `${name}-start`, `${name}-end`);
     groupEnd();
     const duration = lastTime - start;
     let success = true;
     times.sort((a, b) => a - b);
-    /* istanbul ignore next */
+    /* c8 ignore next 3 */
     const againMessage = isBrowser
       ? `     - ${window.location.host + window.location.pathname}?filter=\\[${i + 1}/${tc._seed === null ? '' : `&seed=${tc._seed}`}`
       : `\nrepeat: npm run test -- --filter "\\[${i + 1}/" ${tc._seed === null ? '' : `--seed ${tc._seed}`}`;
@@ -2136,13 +2064,14 @@
       ? ` - ${times.length} repetitions in ${humanizeDuration(duration)} (best: ${humanizeDuration(times[0])}, worst: ${humanizeDuration(last(times))}, median: ${humanizeDuration(median(times))}, average: ${humanizeDuration(average(times))})`
       : ` in ${humanizeDuration(duration)}`;
     if (err !== null) {
-      /* istanbul ignore else */
+      /* c8 ignore start */
       if (err.constructor === SkipError) {
         print(GREY, BOLD, 'Skipped: ', UNBOLD, uncamelized);
       } else {
         success = false;
         print(RED, BOLD, 'Failure: ', UNBOLD, UNCOLOR, uncamelized, GREY, timeInfo, againMessage);
       }
+      /* c8 ignore stop */
     } else {
       print(GREEN, BOLD, 'Success: ', UNBOLD, UNCOLOR, uncamelized, GREY, timeInfo, againMessage);
     }
@@ -2190,29 +2119,29 @@
    * ```
    *
    * @param {string} message
-   * @param {function():Promise<any>} f
+   * @param {function(...any):Promise<any>} f
    * @return {Promise<number>} Returns a promise that resolves the measured duration to apply f
    */
   const measureTimeAsync = async (message, f) => {
     let duration;
-    const start = performance.now();
+    const start = now();
     try {
       await f();
     } finally {
-      duration = performance.now() - start;
+      duration = now() - start;
       print(PURPLE, message, GREY, ` ${humanizeDuration(duration)}`);
     }
     return duration
   };
 
   /**
-   * @param {any} constructor
+   * @param {any} _constructor
    * @param {any} a
    * @param {any} b
    * @param {string} path
    * @throws {TestError}
    */
-  const compareValues = (constructor, a, b, path) => {
+  const compareValues = (_constructor, a, b, path) => {
     if (a !== b) {
       fail(`Values ${stringify(a)} and ${stringify(b)} don't match (${path})`);
     }
@@ -2287,7 +2216,7 @@
         break
       }
       case Object:
-        if (length(a) !== length(b)) {
+        if (length$1(a) !== length$1(b)) {
           _failMessage(message, 'Objects have a different number of attributes', path);
         }
         forEach(a, (value, key) => {
@@ -2304,7 +2233,7 @@
         // @ts-ignore
         a.forEach((value, i) => _compare(value, b[i], `${path}[${i}]`, message, customCompare));
         break
-      /* istanbul ignore next */
+      /* c8 ignore next 4 */
       default:
         if (!customCompare(a.constructor, a, b, path, compareValues)) {
           _failMessage(message, `Values ${stringify(a)} and ${stringify(b)} don't match`, path);
@@ -2323,13 +2252,15 @@
    */
   const compare = (a, b, message = null, customCompare = compareValues) => _compare(a, b, 'obj', message, customCompare);
 
-  /* istanbul ignore next */
   /**
-   * @param {boolean} condition
+   * @template T
+   * @param {T} property
    * @param {string?} [message]
+   * @return {asserts property is NonNullable<T>}
    * @throws {TestError}
    */
-  const assert = (condition, message = null) => condition || fail(`Assertion failed${message !== null ? `: ${message}` : ''}`);
+  /* c8 ignore next */
+  const assert = (property, message = null) => { property || fail(`Assertion failed${message !== null ? `: ${message}` : ''}`); };
 
   /**
    * @param {Object<string, Object<string, function(TestCase):void|Promise<any>>>} tests
@@ -2339,15 +2270,15 @@
      * @param {string} testname
      */
     const filterTest = testname => testname.startsWith('test') || testname.startsWith('benchmark');
-    const numberOfTests = map$1(tests, mod => map$1(mod, (f, fname) => /* istanbul ignore next */ f && filterTest(fname) ? 1 : 0).reduce(add, 0)).reduce(add, 0);
+    const numberOfTests = map$1(tests, mod => map$1(mod, (f, fname) => /* c8 ignore next */ f && filterTest(fname) ? 1 : 0).reduce(add, 0)).reduce(add, 0);
     let successfulTests = 0;
     let testnumber = 0;
-    const start = performance.now();
+    const start = now();
     for (const modName in tests) {
       const mod = tests[modName];
       for (const fname in mod) {
         const f = mod[fname];
-        /* istanbul ignore else */
+        /* c8 ignore else */
         if (f && filterTest(fname)) {
           const repeatEachTest = 1;
           let success = true;
@@ -2355,26 +2286,25 @@
             success = await run(modName, fname, f, testnumber, numberOfTests);
           }
           testnumber++;
-          /* istanbul ignore else */
+          /* c8 ignore else */
           if (success) {
             successfulTests++;
           }
         }
       }
     }
-    const end = performance.now();
+    const end = now();
     print('');
     const success = successfulTests === numberOfTests;
-    /* istanbul ignore next */
+    /* c8 ignore start */
     if (success) {
-      /* istanbul ignore next */
       print(GREEN, BOLD, 'All tests successful!', GREY, UNBOLD, ` in ${humanizeDuration(end - start)}`);
-      /* istanbul ignore next */
       printImgBase64(nyanCatImage, 50);
     } else {
       const failedTests = numberOfTests - successfulTests;
       print(RED, BOLD, `> ${failedTests} test${failedTests > 1 ? 's' : ''} failed`);
     }
+    /* c8 ignore stop */
     return success
   };
 
