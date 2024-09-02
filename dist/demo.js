@@ -21,9 +21,9 @@
    * Copy a Map object into a fresh Map object.
    *
    * @function
-   * @template X,Y
-   * @param {Map<X,Y>} m
-   * @return {Map<X,Y>}
+   * @template K,V
+   * @param {Map<K,V>} m
+   * @return {Map<K,V>}
    */
   const copy = m => {
     const r = create();
@@ -40,12 +40,12 @@
    * ```
    *
    * @function
-   * @template V,K
-   * @template {Map<K,V>} MAP
+   * @template {Map<any, any>} MAP
+   * @template {MAP extends Map<any,infer V> ? function():V : unknown} CF
    * @param {MAP} map
-   * @param {K} key
-   * @param {function():V} createT
-   * @return {V}
+   * @param {MAP extends Map<infer K,any> ? K : unknown} key
+   * @param {CF} createT
+   * @return {ReturnType<CF>}
    */
   const setIfUndefined = (map, key, createT) => {
     let set = map.get(key);
@@ -955,6 +955,11 @@
       }
     }
 
+    /**
+     * Flush the encoded state and transform this to a Uint8Array.
+     *
+     * Note that this should only be called once.
+     */
     toUint8Array () {
       flushUintOptRleEncoder(this);
       return toUint8Array(this.encoder)
@@ -1022,6 +1027,11 @@
       }
     }
 
+    /**
+     * Flush the encoded state and transform this to a Uint8Array.
+     *
+     * Note that this should only be called once.
+     */
     toUint8Array () {
       flushIntDiffOptRleEncoder(this);
       return toUint8Array(this.encoder)
@@ -1721,10 +1731,17 @@
   };
 
   /**
+   * @deprecated use object.size instead
    * @param {Object<string,any>} obj
    * @return {number}
    */
   const length$1 = obj => keys(obj).length;
+
+  /**
+   * @param {Object<string,any>} obj
+   * @return {number}
+   */
+  const size = obj => keys(obj).length;
 
   /**
    * @param {Object|undefined} obj
@@ -1765,7 +1782,7 @@
    * @param {Object<string,any>} b
    * @return {boolean}
    */
-  const equalFlat = (a, b) => a === b || (length$1(a) === length$1(b) && every(a, (val, key) => (val !== undefined || hasProperty(b, key)) && b[key] === val));
+  const equalFlat = (a, b) => a === b || (size(a) === size(b) && every(a, (val, key) => (val !== undefined || hasProperty(b, key)) && b[key] === val));
 
   /**
    * Common functions and function call helpers.
@@ -1979,7 +1996,7 @@
   /* c8 ignore next 4 */
   const getVariable = (name) =>
     isNode
-      ? undefinedToNull(process.env[name.toUpperCase()])
+      ? undefinedToNull(process.env[name.toUpperCase().replaceAll('-', '_')])
       : undefinedToNull(varStorage.getItem(name));
 
   /**
@@ -1998,11 +2015,22 @@
     isOneOf(process.env.FORCE_COLOR, ['true', '1', '2']);
 
   /* c8 ignore start */
-  const supportsColor = !hasParam('no-colors') &&
-    (!isNode || process.stdout.isTTY || forceColor) && (
-    !isNode || hasParam('color') || forceColor ||
+  /**
+   * Color is enabled by default if the terminal supports it.
+   *
+   * Explicitly enable color using `--color` parameter
+   * Disable color using `--no-color` parameter or using `NO_COLOR=1` environment variable.
+   * `FORCE_COLOR=1` enables color and takes precedence over all.
+   */
+  const supportsColor = forceColor || (
+    !hasParam('--no-colors') && // @todo deprecate --no-colors
+    !hasConf('no-color') &&
+    (!isNode || process.stdout.isTTY) && (
+      !isNode ||
+      hasParam('--color') ||
       getVariable('COLORTERM') !== null ||
       (getVariable('TERM') || '').includes('color')
+    )
   );
   /* c8 ignore stop */
 
@@ -2136,6 +2164,20 @@
   /* c8 ignore stop */
 
   /**
+   * JSON utility functions.
+   *
+   * @module json
+   */
+
+  /**
+   * Transform JavaScript object to JSON.
+   *
+   * @param {any} object
+   * @return {string}
+   */
+  const stringify = JSON.stringify;
+
+  /**
    * Utility module to work with EcmaScript Symbols.
    *
    * @module symbol
@@ -2160,17 +2202,36 @@
 
   /* c8 ignore start */
   /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<string|object|number>}
+   * @param {Array<undefined|string|Symbol|Object|number|function():any>} args
+   * @return {Array<string|object|number|undefined>}
    */
   const computeNoColorLoggingArgs = args => {
+    if (args.length === 1 && args[0]?.constructor === Function) {
+      args = /** @type {Array<string|Symbol|Object|number>} */ (/** @type {[function]} */ (args)[0]());
+    }
+    const strBuilder = [];
     const logArgs = [];
     // try with formatting until we find something unsupported
     let i = 0;
     for (; i < args.length; i++) {
       const arg = args[i];
-      if (arg.constructor === String || arg.constructor === Number) ; else if (arg.constructor === Object) {
-        logArgs.push(JSON.stringify(arg));
+      if (arg === undefined) {
+        break
+      } else if (arg.constructor === String || arg.constructor === Number) {
+        strBuilder.push(arg);
+      } else if (arg.constructor === Object) {
+        break
+      }
+    }
+    if (i > 0) {
+      // create logArgs with what we have so far
+      logArgs.push(strBuilder.join(''));
+    }
+    // append the rest
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      if (!(arg instanceof Symbol)) {
+        logArgs.push(arg);
       }
     }
     return logArgs
@@ -2198,6 +2259,9 @@
     return !doLogging
       ? nop
       : (...args) => {
+          if (args.length === 1 && args[0]?.constructor === Function) {
+            args = args[0]();
+          }
           const timeNow = getUnixTime();
           const timeDiff = timeNow - lastLoggingTime;
           lastLoggingTime = timeNow;
@@ -2205,11 +2269,20 @@
             color,
             moduleName,
             UNCOLOR,
-            ...args.map((arg) =>
-              (typeof arg === 'string' || typeof arg === 'symbol')
-                ? arg
-                : JSON.stringify(arg)
-            ),
+            ...args.map((arg) => {
+              if (arg != null && arg.constructor === Uint8Array) {
+                arg = Array.from(arg);
+              }
+              const t = typeof arg;
+              switch (t) {
+                case 'string':
+                case 'symbol':
+                  return arg
+                default: {
+                  return stringify(arg)
+                }
+              }
+            }),
             color,
             ' +' + timeDiff + 'ms'
           );
@@ -2239,11 +2312,14 @@
   };
 
   /**
-   * @param {Array<string|Symbol|Object|number>} args
+   * @param {Array<string|Symbol|Object|number|function():any>} args
    * @return {Array<string|object|number>}
    */
   /* c8 ignore start */
   const computeBrowserLoggingArgs = (args) => {
+    if (args.length === 1 && args[0]?.constructor === Function) {
+      args = /** @type {Array<string|Symbol|Object|number>} */ (/** @type {[function]} */ (args)[0]());
+    }
     const strBuilder = [];
     const styles = [];
     const currentStyle = create();
@@ -2260,6 +2336,9 @@
       if (style !== undefined) {
         currentStyle.set(style.left, style.right);
       } else {
+        if (arg === undefined) {
+          break
+        }
         if (arg.constructor === String || arg.constructor === Number) {
           const style = mapToStyleString(currentStyle);
           if (i > 0 || style.length > 0) {
@@ -2676,6 +2755,7 @@
    * @module Y
    */
 
+
   const generateNewClientId = uint32;
 
   /**
@@ -2690,10 +2770,26 @@
    */
 
   /**
-   * A Yjs instance handles the state of shared data.
-   * @extends Observable<string>
+   * @typedef {Object} DocEvents
+   * @property {function(Doc):void} DocEvents.destroy
+   * @property {function(Doc):void} DocEvents.load
+   * @property {function(boolean, Doc):void} DocEvents.sync
+   * @property {function(Uint8Array, any, Doc, Transaction):void} DocEvents.update
+   * @property {function(Uint8Array, any, Doc, Transaction):void} DocEvents.updateV2
+   * @property {function(Doc):void} DocEvents.beforeAllTransactions
+   * @property {function(Transaction, Doc):void} DocEvents.beforeTransaction
+   * @property {function(Transaction, Doc):void} DocEvents.beforeObserverCalls
+   * @property {function(Transaction, Doc):void} DocEvents.afterTransaction
+   * @property {function(Transaction, Doc):void} DocEvents.afterTransactionCleanup
+   * @property {function(Doc, Array<Transaction>):void} DocEvents.afterAllTransactions
+   * @property {function({ loaded: Set<Doc>, added: Set<Doc>, removed: Set<Doc> }, Doc, Transaction):void} DocEvents.subdocs
    */
-  class Doc extends Observable {
+
+  /**
+   * A Yjs instance handles the state of shared data.
+   * @extends ObservableV2<DocEvents>
+   */
+  class Doc extends ObservableV2 {
     /**
      * @param {DocOpts} opts configuration
      */
@@ -2770,8 +2866,8 @@
           this.whenSynced = provideSyncedPromise();
         }
         this.isSynced = isSynced === undefined || isSynced === true;
-        if (!this.isLoaded) {
-          this.emit('load', []);
+        if (this.isSynced && !this.isLoaded) {
+          this.emit('load', [this]);
         }
       });
       /**
@@ -2827,30 +2923,31 @@
     /**
      * Define a shared data type.
      *
-     * Multiple calls of `y.get(name, TypeConstructor)` yield the same result
+     * Multiple calls of `ydoc.get(name, TypeConstructor)` yield the same result
      * and do not overwrite each other. I.e.
-     * `y.define(name, Y.Array) === y.define(name, Y.Array)`
+     * `ydoc.get(name, Y.Array) === ydoc.get(name, Y.Array)`
      *
-     * After this method is called, the type is also available on `y.share.get(name)`.
+     * After this method is called, the type is also available on `ydoc.share.get(name)`.
      *
      * *Best Practices:*
-     * Define all types right after the Yjs instance is created and store them in a separate object.
+     * Define all types right after the Y.Doc instance is created and store them in a separate object.
      * Also use the typed methods `getText(name)`, `getArray(name)`, ..
      *
+     * @template {typeof AbstractType<any>} Type
      * @example
-     *   const y = new Y(..)
+     *   const ydoc = new Y.Doc(..)
      *   const appState = {
-     *     document: y.getText('document')
-     *     comments: y.getArray('comments')
+     *     document: ydoc.getText('document')
+     *     comments: ydoc.getArray('comments')
      *   }
      *
      * @param {string} name
-     * @param {Function} TypeConstructor The constructor of the type definition. E.g. Y.Text, Y.Array, Y.Map, ...
-     * @return {AbstractType<any>} The created type. Constructed with TypeConstructor
+     * @param {Type} TypeConstructor The constructor of the type definition. E.g. Y.Text, Y.Array, Y.Map, ...
+     * @return {InstanceType<Type>} The created type. Constructed with TypeConstructor
      *
      * @public
      */
-    get (name, TypeConstructor = AbstractType) {
+    get (name, TypeConstructor = /** @type {any} */ (AbstractType)) {
       const type = setIfUndefined(this.share, name, () => {
         // @ts-ignore
         const t = new TypeConstructor();
@@ -2876,12 +2973,12 @@
           t._length = type._length;
           this.share.set(name, t);
           t._integrate(this, null);
-          return t
+          return /** @type {InstanceType<Type>} */ (t)
         } else {
           throw new Error(`Type with the name ${name} has already been defined with a different constructor`)
         }
       }
-      return type
+      return /** @type {InstanceType<Type>} */ (type)
     }
 
     /**
@@ -2892,8 +2989,7 @@
      * @public
      */
     getArray (name = '') {
-      // @ts-ignore
-      return this.get(name, YArray)
+      return /** @type {YArray<T>} */ (this.get(name, YArray))
     }
 
     /**
@@ -2903,7 +2999,6 @@
      * @public
      */
     getText (name = '') {
-      // @ts-ignore
       return this.get(name, YText)
     }
 
@@ -2915,8 +3010,17 @@
      * @public
      */
     getMap (name = '') {
-      // @ts-ignore
-      return this.get(name, YMap)
+      return /** @type {YMap<T>} */ (this.get(name, YMap))
+    }
+
+    /**
+     * @param {string} [name]
+     * @return {YXmlElement}
+     *
+     * @public
+     */
+    getXmlElement (name = '') {
+      return /** @type {YXmlElement<{[key:string]:string}>} */ (this.get(name, YXmlElement))
     }
 
     /**
@@ -2926,7 +3030,6 @@
      * @public
      */
     getXmlFragment (name = '') {
-      // @ts-ignore
       return this.get(name, YXmlFragment)
     }
 
@@ -2970,25 +3073,10 @@
           transaction.subdocsRemoved.add(this);
         }, null, true);
       }
-      this.emit('destroyed', [true]);
+      // @ts-ignore
+      this.emit('destroyed', [true]); // DEPRECATED!
       this.emit('destroy', [this]);
       super.destroy();
-    }
-
-    /**
-     * @param {string} eventName
-     * @param {function(...any):any} f
-     */
-    on (eventName, f) {
-      super.on(eventName, f);
-    }
-
-    /**
-     * @param {string} eventName
-     * @param {function} f
-     */
-    off (eventName, f) {
-      super.off(eventName, f);
     }
   }
 
@@ -3583,6 +3671,23 @@
   }
 
   /**
+   * @module encoding
+   */
+  /*
+   * We use the first five bits in the info flag for determining the type of the struct.
+   *
+   * 0: GC
+   * 1: Item with Deleted content
+   * 2: Item with JSON content
+   * 3: Item with Binary content
+   * 4: Item with String content
+   * 5: Item with Embed content (for richtext content)
+   * 6: Item with Format content (a formatting marker for richtext content)
+   * 7: Item with Type
+   */
+
+
+  /**
    * @param {UpdateEncoderV1 | UpdateEncoderV2} encoder
    * @param {Array<GC|Item>} structs All structs by `client`
    * @param {number} client
@@ -3690,7 +3795,7 @@
             // @type {string|null}
             const struct = new Item(
               createID(client, clock),
-              null, // leftd
+              null, // left
               (info & BIT8) === BIT8 ? decoder.readLeftID() : null, // origin
               null, // right
               (info & BIT7) === BIT7 ? decoder.readRightID() : null, // right origin
@@ -3714,7 +3819,7 @@
 
             const struct = new Item(
               createID(client, clock),
-              null, // leftd
+              null, // left
               origin, // origin
               null, // right
               rightOrigin, // right origin
@@ -3786,7 +3891,7 @@
       return nextStructsTarget
     };
     let curStructsTarget = getNextStructTarget();
-    if (curStructsTarget === null && stack.length === 0) {
+    if (curStructsTarget === null) {
       return null
     }
 
@@ -3906,7 +4011,7 @@
   /**
    * Read and apply a document update.
    *
-   * This function has the same effect as `applyUpdate` but accepts an decoder.
+   * This function has the same effect as `applyUpdate` but accepts a decoder.
    *
    * @param {decoding.Decoder} decoder
    * @param {Doc} ydoc
@@ -4571,7 +4676,8 @@
    * possible. Here is an example to illustrate the advantages of bundling:
    *
    * @example
-   * const map = y.define('map', YMap)
+   * const ydoc = new Y.Doc()
+   * const map = ydoc.getMap('map')
    * // Log content when change is triggered
    * map.observe(() => {
    *   console.log('change triggered')
@@ -4580,7 +4686,7 @@
    * map.set('a', 0) // => "change triggered"
    * map.set('b', 0) // => "change triggered"
    * // When put in a transaction, it will trigger the log after the transaction:
-   * y.transact(() => {
+   * ydoc.transact(() => {
    *   map.set('a', 1)
    *   map.set('b', 1)
    * }) // => "change triggered"
@@ -4756,7 +4862,7 @@
    */
   const tryMergeDeleteSet = (ds, store) => {
     // try to merge deleted / gc'd items
-    // merge from right to left for better efficiecy and so we don't miss any merge targets
+    // merge from right to left for better efficiency and so we don't miss any merge targets
     ds.clients.forEach((deleteItems, client) => {
       const structs = /** @type {Array<GC|Item>} */ (store.clients.get(client));
       for (let di = deleteItems.length - 1; di >= 0; di--) {
@@ -5621,8 +5727,8 @@
         let i = 0;
         let c = /** @type {AbstractType<any>} */ (child._item.parent)._start;
         while (c !== child._item && c !== null) {
-          if (!c.deleted) {
-            i++;
+          if (!c.deleted && c.countable) {
+            i += c.length;
           }
           c = c.right;
         }
@@ -5915,6 +6021,10 @@
     }
 
     /**
+     * Makes a copy of this data type that can be included somewhere else.
+     *
+     * Note that the content is only readable _after_ it has been included somewhere in the Ydoc.
+     *
      * @return {AbstractType<EventType>}
      */
     clone () {
@@ -6053,7 +6163,7 @@
   };
 
   /**
-   * Executes a provided function on once on overy element of this YArray.
+   * Executes a provided function on once on every element of this YArray.
    *
    * @param {AbstractType<any>} type
    * @param {function(any,number,any):void} f A function to execute on every element of this YArray.
@@ -6459,6 +6569,34 @@
   };
 
   /**
+   * @param {AbstractType<any>} parent
+   * @param {Snapshot} snapshot
+   * @return {Object<string,Object<string,any>|number|null|Array<any>|string|Uint8Array|AbstractType<any>|undefined>}
+   *
+   * @private
+   * @function
+   */
+  const typeMapGetAllSnapshot = (parent, snapshot) => {
+    /**
+     * @type {Object<string,any>}
+     */
+    const res = {};
+    parent._map.forEach((value, key) => {
+      /**
+       * @type {Item|null}
+       */
+      let v = value;
+      while (v !== null && (!snapshot.sv.has(v.id.client) || v.id.clock >= (snapshot.sv.get(v.id.client) || 0))) {
+        v = v.left;
+      }
+      if (v !== null && isVisible(v, snapshot)) {
+        res[key] = v.content.getContent()[v.length - 1];
+      }
+    });
+    return res
+  };
+
+  /**
    * @param {Map<string,Item>} map
    * @return {IterableIterator<Array<any>>}
    *
@@ -6471,21 +6609,13 @@
    * @module YArray
    */
 
+
   /**
    * Event that describes the changes on a YArray
    * @template T
    * @extends YEvent<YArray<T>>
    */
-  class YArrayEvent extends YEvent {
-    /**
-     * @param {YArray<T>} yarray The changed type
-     * @param {Transaction} transaction The transaction object
-     */
-    constructor (yarray, transaction) {
-      super(yarray, transaction);
-      this._transaction = transaction;
-    }
-  }
+  class YArrayEvent extends YEvent {}
 
   /**
    * A shared Array implementation.
@@ -6546,6 +6676,10 @@
     }
 
     /**
+     * Makes a copy of this data type that can be included somewhere else.
+     *
+     * Note that the content is only readable _after_ it has been included somewhere in the Ydoc.
+     *
      * @return {YArray<T>}
      */
     clone () {
@@ -6618,9 +6752,9 @@
     }
 
     /**
-     * Preppends content to this YArray.
+     * Prepends content to this YArray.
      *
-     * @param {Array<T>} content Array of content to preppend.
+     * @param {Array<T>} content Array of content to prepend.
      */
     unshift (content) {
       this.insert(0, content);
@@ -6662,7 +6796,8 @@
     }
 
     /**
-     * Transforms this YArray to a JavaScript Array.
+     * Returns a portion of this YArray into a JavaScript Array selected
+     * from start to end (end not included).
      *
      * @param {number} [start]
      * @param {number} [end]
@@ -6695,7 +6830,7 @@
     }
 
     /**
-     * Executes a provided function once on overy element of this YArray.
+     * Executes a provided function once on every element of this YArray.
      *
      * @param {function(T,number,YArray<T>):void} f A function to execute on every element of this YArray.
      */
@@ -6727,6 +6862,11 @@
   const readYArray = _decoder => new YArray();
 
   /**
+   * @module YMap
+   */
+
+
+  /**
    * @template T
    * @extends YEvent<YMap<T>>
    * Event that describes the changes on a YMap.
@@ -6748,7 +6888,7 @@
    * A shared Map implementation.
    *
    * @extends AbstractType<YMapEvent<MapType>>
-   * @implements {Iterable<MapType>}
+   * @implements {Iterable<[string, MapType]>}
    */
   class YMap extends AbstractType {
     /**
@@ -6796,6 +6936,10 @@
     }
 
     /**
+     * Makes a copy of this data type that can be included somewhere else.
+     *
+     * Note that the content is only readable _after_ it has been included somewhere in the Ydoc.
+     *
      * @return {YMap<MapType>}
      */
     clone () {
@@ -6859,7 +7003,7 @@
     /**
      * Returns the values for each element in the YMap Type.
      *
-     * @return {IterableIterator<any>}
+     * @return {IterableIterator<MapType>}
      */
     values () {
       return iteratorMap(createMapIterator(this._map), /** @param {any} v */ v => v[1].content.getContent()[v[1].length - 1])
@@ -6868,10 +7012,10 @@
     /**
      * Returns an Iterator of [key, value] pairs
      *
-     * @return {IterableIterator<any>}
+     * @return {IterableIterator<[string, MapType]>}
      */
     entries () {
-      return iteratorMap(createMapIterator(this._map), /** @param {any} v */ v => [v[0], v[1].content.getContent()[v[1].length - 1]])
+      return iteratorMap(createMapIterator(this._map), /** @param {any} v */ v => /** @type {any} */ ([v[0], v[1].content.getContent()[v[1].length - 1]]))
     }
 
     /**
@@ -6890,7 +7034,7 @@
     /**
      * Returns an Iterator of [key, value] pairs
      *
-     * @return {IterableIterator<any>}
+     * @return {IterableIterator<[string, MapType]>}
      */
     [Symbol.iterator] () {
       return this.entries()
@@ -6982,6 +7126,11 @@
   const readYMap = _decoder => new YMap();
 
   /**
+   * @module YText
+   */
+
+
+  /**
    * @param {any} a
    * @param {any} b
    * @return {boolean}
@@ -7065,14 +7214,15 @@
    * @param {Transaction} transaction
    * @param {AbstractType<any>} parent
    * @param {number} index
+   * @param {boolean} useSearchMarker
    * @return {ItemTextListPosition}
    *
    * @private
    * @function
    */
-  const findPosition = (transaction, parent, index) => {
+  const findPosition = (transaction, parent, index, useSearchMarker) => {
     const currentAttributes = new Map();
-    const marker = findMarker(parent, index);
+    const marker = useSearchMarker ? findMarker(parent, index) : null;
     if (marker) {
       const pos = new ItemTextListPosition(marker.p.left, marker.p, marker.index, currentAttributes);
       return findNextPosition(transaction, pos, index - marker.index)
@@ -7148,7 +7298,7 @@
     while (true) {
       if (currPos.right === null) {
         break
-      } else if (currPos.right.deleted || (currPos.right.content.constructor === ContentFormat && equalAttrs(attributes[(/** @type {ContentFormat} */ (currPos.right.content)).key] || null, /** @type {ContentFormat} */ (currPos.right.content).value))) ; else {
+      } else if (currPos.right.deleted || (currPos.right.content.constructor === ContentFormat && equalAttrs(attributes[(/** @type {ContentFormat} */ (currPos.right.content)).key] ?? null, /** @type {ContentFormat} */ (currPos.right.content).value))) ; else {
         break
       }
       currPos.forward();
@@ -7172,7 +7322,7 @@
     // insert format-start items
     for (const key in attributes) {
       const val = attributes[key];
-      const currentVal = currPos.currentAttributes.get(key) || null;
+      const currentVal = currPos.currentAttributes.get(key) ?? null;
       if (!equalAttrs(currentVal, val)) {
         // save negated attribute (set null if currentVal undefined)
         negatedAttributes.set(key, currentVal);
@@ -7334,12 +7484,12 @@
         switch (content.constructor) {
           case ContentFormat: {
             const { key, value } = /** @type {ContentFormat} */ (content);
-            const startAttrValue = startAttributes.get(key) || null;
+            const startAttrValue = startAttributes.get(key) ?? null;
             if (endFormats.get(key) !== content || startAttrValue === value) {
               // Either this format is overwritten or it is not necessary because the attribute already existed.
               start.delete(transaction);
               cleanups++;
-              if (!reachedCurr && (currAttributes.get(key) || null) === value && startAttrValue !== value) {
+              if (!reachedCurr && (currAttributes.get(key) ?? null) === value && startAttrValue !== value) {
                 if (startAttrValue === null) {
                   currAttributes.delete(key);
                 } else {
@@ -7714,12 +7864,12 @@
                 const { key, value } = /** @type {ContentFormat} */ (item.content);
                 if (this.adds(item)) {
                   if (!this.deletes(item)) {
-                    const curVal = currentAttributes.get(key) || null;
+                    const curVal = currentAttributes.get(key) ?? null;
                     if (!equalAttrs(curVal, value)) {
                       if (action === 'retain') {
                         addOp();
                       }
-                      if (equalAttrs(value, (oldAttributes.get(key) || null))) {
+                      if (equalAttrs(value, (oldAttributes.get(key) ?? null))) {
                         delete attributes[key];
                       } else {
                         attributes[key] = value;
@@ -7730,7 +7880,7 @@
                   }
                 } else if (this.deletes(item)) {
                   oldAttributes.set(key, value);
-                  const curVal = currentAttributes.get(key) || null;
+                  const curVal = currentAttributes.get(key) ?? null;
                   if (!equalAttrs(curVal, value)) {
                     if (action === 'retain') {
                       addOp();
@@ -7842,6 +7992,10 @@
     }
 
     /**
+     * Makes a copy of this data type that can be included somewhere else.
+     *
+     * Note that the content is only readable _after_ it has been included somewhere in the Ydoc.
+     *
      * @return {YText}
      */
     clone () {
@@ -8065,7 +8219,7 @@
       const y = this.doc;
       if (y !== null) {
         transact(y, transaction => {
-          const pos = findPosition(transaction, this, index);
+          const pos = findPosition(transaction, this, index, !attributes);
           if (!attributes) {
             attributes = {};
             // @ts-ignore
@@ -8083,20 +8237,20 @@
      *
      * @param {number} index The index to insert the embed at.
      * @param {Object | AbstractType<any>} embed The Object that represents the embed.
-     * @param {TextAttributes} attributes Attribute information to apply on the
+     * @param {TextAttributes} [attributes] Attribute information to apply on the
      *                                    embed
      *
      * @public
      */
-    insertEmbed (index, embed, attributes = {}) {
+    insertEmbed (index, embed, attributes) {
       const y = this.doc;
       if (y !== null) {
         transact(y, transaction => {
-          const pos = findPosition(transaction, this, index);
-          insertText(transaction, this, pos, embed, attributes);
+          const pos = findPosition(transaction, this, index, !attributes);
+          insertText(transaction, this, pos, embed, attributes || {});
         });
       } else {
-        /** @type {Array<function>} */ (this._pending).push(() => this.insertEmbed(index, embed, attributes));
+        /** @type {Array<function>} */ (this._pending).push(() => this.insertEmbed(index, embed, attributes || {}));
       }
     }
 
@@ -8115,7 +8269,7 @@
       const y = this.doc;
       if (y !== null) {
         transact(y, transaction => {
-          deleteText(transaction, findPosition(transaction, this, index), length);
+          deleteText(transaction, findPosition(transaction, this, index, true), length);
         });
       } else {
         /** @type {Array<function>} */ (this._pending).push(() => this.delete(index, length));
@@ -8139,7 +8293,7 @@
       const y = this.doc;
       if (y !== null) {
         transact(y, transaction => {
-          const pos = findPosition(transaction, this, index);
+          const pos = findPosition(transaction, this, index, false);
           if (pos.right === null) {
             return
           }
@@ -8237,6 +8391,7 @@
   /**
    * @module YXml
    */
+
 
   /**
    * Define the elements to which a set of CSS queries apply.
@@ -8378,6 +8533,10 @@
     }
 
     /**
+     * Makes a copy of this data type that can be included somewhere else.
+     *
+     * Note that the content is only readable _after_ it has been included somewhere in the Ydoc.
+     *
      * @return {YXmlFragment}
      */
     clone () {
@@ -8591,9 +8750,9 @@
     }
 
     /**
-     * Preppends content to this YArray.
+     * Prepends content to this YArray.
      *
-     * @param {Array<YXmlElement|YXmlText>} content Array of content to preppend.
+     * @param {Array<YXmlElement|YXmlText>} content Array of content to prepend.
      */
     unshift (content) {
       this.insert(0, content);
@@ -8610,7 +8769,8 @@
     }
 
     /**
-     * Transforms this YArray to a JavaScript Array.
+     * Returns a portion of this YXmlFragment into a JavaScript Array selected
+     * from start to end (end not included).
      *
      * @param {number} [start]
      * @param {number} [end]
@@ -8621,7 +8781,7 @@
     }
 
     /**
-     * Executes a provided function on once on overy child element.
+     * Executes a provided function on once on every child element.
      *
      * @param {function(YXmlElement|YXmlText,number, typeof self):void} f A function to execute on every element of this YArray.
      */
@@ -8657,7 +8817,7 @@
 
   /**
    * An YXmlElement imitates the behavior of a
-   * {@link https://developer.mozilla.org/en-US/docs/Web/API/Element|Dom Element}.
+   * https://developer.mozilla.org/en-US/docs/Web/API/Element|Dom Element
    *
    * * An YXmlElement has attributes (key value pairs)
    * * An YXmlElement has childElements that must inherit from YXmlElement
@@ -8718,6 +8878,10 @@
     }
 
     /**
+     * Makes a copy of this data type that can be included somewhere else.
+     *
+     * Note that the content is only readable _after_ it has been included somewhere in the Ydoc.
+     *
      * @return {YXmlElement<KV>}
      */
     clone () {
@@ -8830,12 +8994,13 @@
     /**
      * Returns all attribute name/value pairs in a JSON Object.
      *
+     * @param {Snapshot} [snapshot]
      * @return {{ [Key in Extract<keyof KV,string>]?: KV[Key]}} A JSON Object that describes the attributes.
      *
      * @public
      */
-    getAttributes () {
-      return /** @type {any} */ (typeMapGetAll(this))
+    getAttributes (snapshot) {
+      return /** @type {any} */ (snapshot ? typeMapGetAllSnapshot(this, snapshot) : typeMapGetAll(this))
     }
 
     /**
@@ -8953,6 +9118,10 @@
     }
 
     /**
+     * Makes a copy of this data type that can be included somewhere else.
+     *
+     * Note that the content is only readable _after_ it has been included somewhere in the Ydoc.
+     *
      * @return {YXmlHook}
      */
     clone () {
@@ -9043,6 +9212,10 @@
     }
 
     /**
+     * Makes a copy of this data type that can be included somewhere else.
+     *
+     * Note that the content is only readable _after_ it has been included somewhere in the Ydoc.
+     *
      * @return {YXmlText}
      */
     clone () {
@@ -10813,6 +10986,7 @@
 
   /** eslint-env browser */
 
+
   const glo = /** @type {any} */ (typeof globalThis !== 'undefined'
     ? globalThis
     : typeof window !== 'undefined'
@@ -11806,7 +11980,7 @@
       this.connected = false;
       this.synced = false;
       /**
-       * @type {any}
+       * @type {import('simple-peer').Instance}
        */
       this.peer = new simplepeer_min({ initiator, ...room.provider.peerOpts });
       this.peer.on('signal', signal => {
@@ -12193,7 +12367,7 @@
    * @property {awarenessProtocol.Awareness} [awareness]
    * @property {number} [maxConns]
    * @property {boolean} [filterBcConns]
-   * @property {any} [peerOpts]
+   * @property {import('simple-peer').SimplePeer['config']} [peerOpts]
    */
 
   /**

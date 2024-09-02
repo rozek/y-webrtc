@@ -900,6 +900,7 @@
   };
 
   /**
+   * @deprecated use object.size instead
    * @param {Object<string,any>} obj
    * @return {number}
    */
@@ -1017,7 +1018,7 @@
   /* c8 ignore next 4 */
   const getVariable = (name) =>
     isNode
-      ? undefinedToNull(process.env[name.toUpperCase()])
+      ? undefinedToNull(process.env[name.toUpperCase().replaceAll('-', '_')])
       : undefinedToNull(varStorage.getItem(name));
 
   /**
@@ -1036,11 +1037,22 @@
     isOneOf(process.env.FORCE_COLOR, ['true', '1', '2']);
 
   /* c8 ignore start */
-  const supportsColor = !hasParam('no-colors') &&
-    (!isNode || process.stdout.isTTY || forceColor) && (
-    !isNode || hasParam('color') || forceColor ||
+  /**
+   * Color is enabled by default if the terminal supports it.
+   *
+   * Explicitly enable color using `--color` parameter
+   * Disable color using `--no-color` parameter or using `NO_COLOR=1` environment variable.
+   * `FORCE_COLOR=1` enables color and takes precedence over all.
+   */
+  const supportsColor = forceColor || (
+    !hasParam('--no-colors') && // @todo deprecate --no-colors
+    !hasConf('no-color') &&
+    (!isNode || process.stdout.isTTY) && (
+      !isNode ||
+      hasParam('--color') ||
       getVariable('COLORTERM') !== null ||
       (getVariable('TERM') || '').includes('color')
+    )
   );
   /* c8 ignore stop */
 
@@ -1252,17 +1264,36 @@
 
   /* c8 ignore start */
   /**
-   * @param {Array<string|Symbol|Object|number>} args
-   * @return {Array<string|object|number>}
+   * @param {Array<undefined|string|Symbol|Object|number|function():any>} args
+   * @return {Array<string|object|number|undefined>}
    */
   const computeNoColorLoggingArgs = args => {
+    if (args.length === 1 && args[0]?.constructor === Function) {
+      args = /** @type {Array<string|Symbol|Object|number>} */ (/** @type {[function]} */ (args)[0]());
+    }
+    const strBuilder = [];
     const logArgs = [];
     // try with formatting until we find something unsupported
     let i = 0;
     for (; i < args.length; i++) {
       const arg = args[i];
-      if (arg.constructor === String || arg.constructor === Number) ; else if (arg.constructor === Object) {
-        logArgs.push(JSON.stringify(arg));
+      if (arg === undefined) {
+        break
+      } else if (arg.constructor === String || arg.constructor === Number) {
+        strBuilder.push(arg);
+      } else if (arg.constructor === Object) {
+        break
+      }
+    }
+    if (i > 0) {
+      // create logArgs with what we have so far
+      logArgs.push(strBuilder.join(''));
+    }
+    // append the rest
+    for (; i < args.length; i++) {
+      const arg = args[i];
+      if (!(arg instanceof Symbol)) {
+        logArgs.push(arg);
       }
     }
     return logArgs
@@ -1291,11 +1322,14 @@
   };
 
   /**
-   * @param {Array<string|Symbol|Object|number>} args
+   * @param {Array<string|Symbol|Object|number|function():any>} args
    * @return {Array<string|object|number>}
    */
   /* c8 ignore start */
   const computeBrowserLoggingArgs = (args) => {
+    if (args.length === 1 && args[0]?.constructor === Function) {
+      args = /** @type {Array<string|Symbol|Object|number>} */ (/** @type {[function]} */ (args)[0]());
+    }
     const strBuilder = [];
     const styles = [];
     const currentStyle = create$2();
@@ -1312,6 +1346,9 @@
       if (style !== undefined) {
         currentStyle.set(style.left, style.right);
       } else {
+        if (arg === undefined) {
+          break
+        }
         if (arg.constructor === String || arg.constructor === Number) {
           const style = mapToStyleString(currentStyle);
           if (i > 0 || style.length > 0) {
@@ -1429,12 +1466,15 @@
     // try with formatting until we find something unsupported
     let i = 0;
     for (; i < args.length; i++) {
-      const arg = args[i];
+      let arg = args[i];
       // @ts-ignore
       const style = _browserStyleMap[arg];
       if (style !== undefined) {
         currentStyle.set(style.left, style.right);
       } else {
+        if (arg === undefined) {
+          arg = 'undefined ';
+        }
         if (arg.constructor === String || arg.constructor === Number) {
           // @ts-ignore
           const span = element('span', [

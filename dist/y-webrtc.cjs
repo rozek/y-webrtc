@@ -290,7 +290,7 @@ class WebrtcConn {
     this.connected = false;
     this.synced = false;
     /**
-     * @type {any}
+     * @type {import('simple-peer').Instance}
      */
     this.peer = new Peer({ initiator, ...room.provider.peerOpts });
     this.peer.on('signal', signal => {
@@ -677,7 +677,7 @@ class SignalingConn extends ws.WebsocketClient {
  * @property {awarenessProtocol.Awareness} [awareness]
  * @property {number} [maxConns]
  * @property {boolean} [filterBcConns]
- * @property {any} [peerOpts]
+ * @property {import('simple-peer').SimplePeer['config']} [peerOpts]
  */
 
 /**
